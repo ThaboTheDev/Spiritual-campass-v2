@@ -956,3 +956,35 @@ test("an unconfigured deploy says so, instead of \"That did not work\"", async (
   assert.deepEqual(b2.errors, [], "no page errors");
   b2.close();
 });
+
+test("every language carries the same keys, and the client never asks for one that is missing", () => {
+  /* Evaluate the real lang.js rather than parsing it: a quoting mistake or a stray brace then
+     fails here too. An earlier bug put a new key into zu four times because a regex matched
+     the first block every time - this is the guard for that class of error. */
+  const L = new Function(SRC["lang.js"] + "\nreturn LANGS;")();
+  const langs = ["zu", "pt", "ny", "bem"];
+  assert.deepEqual(Object.keys(L).sort(), [...langs, "en"].sort(), "four languages plus keyless English");
+  assert.deepEqual(Object.keys(L.en), ["name"], "English needs no keys: it is the inline source");
+
+  const sets = {};
+  for (const l of langs) sets[l] = new Set(Object.keys(L[l]));
+  for (const l of langs) {
+    const missing = [...sets.zu].filter((k) => !sets[l].has(k));
+    const extra = [...sets[l]].filter((k) => !sets.zu.has(k));
+    assert.deepEqual({ missing, extra }, { missing: [], extra: [] }, l + " must carry exactly the same key set as zu");
+  }
+
+  // every key the client asks for must exist in all four
+  const used = new Set();
+  for (const f of ["member.js", "app.js"]) {
+    for (const m of SRC[f].matchAll(/two\(\s*(?:`[^`]*`|"(?:[^"\\]|\\.)*")\s*,\s*"([a-z0-9_]+)"/g)) used.add(m[1]);
+    for (const m of SRC[f].matchAll(/\["(?:[^"\\]|\\.)*",\s*"([a-z0-9_]+)"\]/g)) used.add(m[1]);
+    for (const m of SRC[f].matchAll(/[^a-zA-Z_]T\("([a-z0-9_]+)"/g)) used.add(m[1]);
+  }
+  assert.ok(used.size > 100, "the extraction really found the client's keys, found " + used.size);
+  for (const k of [...used].sort()) {
+    for (const l of langs) assert.ok(sets[l].has(k), `${k} is used by the client but missing from ${l}`);
+  }
+  // and no leftover keys from the removed e-mail flow
+  for (const k of [...sets.zu]) assert.ok(!/^(code_|otp_)/.test(k), k + " belongs to the removed e-mail flow");
+});
