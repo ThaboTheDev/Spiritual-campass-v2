@@ -1215,3 +1215,27 @@ test("the store build hides every payment affordance, on all three views", async
   assert.deepEqual(ac.errors, [], "no page errors");
   ac.close();
 });
+
+/* The gate audit above only scans #member and #m-modal. Spec 15 asks for every
+   input to be labelled, and the app area has its own inputs (the centre search,
+   the admin centre form). An unlabelled one added there would have passed. */
+test("every input and button in the whole document has an accessible name", async () => {
+  const b = await boot();
+  const bad = await b.ev(`(() => {
+    const out = [];
+    for (const f of document.querySelectorAll("input, select, textarea")) {
+      const ok = !!document.querySelector('label[for="' + f.id + '"]')
+        || !!f.getAttribute("aria-label") || !!f.getAttribute("aria-labelledby")
+        || !!f.closest("label");
+      if (!ok) out.push("unlabelled input: " + (f.id || f.name || f.outerHTML.slice(0, 60)));
+    }
+    for (const n of document.querySelectorAll("button")) {
+      const txt = (n.textContent || "").trim();
+      if (!txt && !n.getAttribute("aria-label") && !n.getAttribute("title"))
+        out.push("unnamed button: " + n.outerHTML.slice(0, 60));
+    }
+    return out;
+  })()`);
+  assert.deepEqual(bad, [], "accessible-name problems: " + JSON.stringify(bad));
+  b.close();
+});
