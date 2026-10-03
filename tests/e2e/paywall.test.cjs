@@ -515,6 +515,49 @@ const centres = { regions: REGIONS, centres: ROWS };
   await p.context().close();
   CUR = null;
 
+  // 18. true offline. Step 9 fakes offline with navigator.onLine, which exercises the
+  //     app's decision logic but still leaves the network up. Here the network is really
+  //     dead and the service-worker cache has to serve the whole app shell - the actual
+  //     promise the PWA makes.
+  state.me = trial();
+  p = await newPage(seeded(saved), { width: 390, height: 844 });
+  await p.goto(srv.url + "/");
+  const swc = p.context();
+  const offlineSW = swc.serviceWorkers()[0] ||
+    await swc.waitForEvent("serviceworker", { timeout: 15000 }).catch(() => null);
+  await ok(!!offlineSW, "the service worker is active before the network dies");
+  /* Poll rather than sleep: install + addAll(CORE) is not a fixed duration. */
+  let shell = null;
+  if (offlineSW) {
+    for (let i = 0; i < 100; i++) {
+      shell = await offlineSW.evaluate(async () => {
+        const names = (await caches.keys()).filter((k) => /^tshk-compass-sub-v\d+$/.test(k));
+        if (!names.length) return null;
+        const c = await caches.open(names[0]);
+        const hit = async (u) => !!(await c.match(new URL(u, location.origin)));
+        return { cache: names[0], html: await hit("/index.html"), member: await hit("/member.js"), app: await hit("/app.js") };
+      });
+      if (shell && shell.html && shell.member && shell.app) break;
+      await p.waitForTimeout(50);
+    }
+  }
+  await ok(!!(shell && shell.html && shell.member && shell.app),
+    "the app shell is in the cache before going offline: " + JSON.stringify(shell));
+
+  /* Kill the network for real: setOffline plus an abort-all route, so nothing can answer
+     except the cache. */
+  await p.context().setOffline(true);
+  await p.route("**/*", (r) => r.abort());
+  await p.reload({ waitUntil: "domcontentloaded" });
+  await p.waitForTimeout(1500);
+  await ok(!(await vis(p, "member")), "with the network dead the app still opens from the cached shell");
+  await ok((await txt(p, "c-offline")).includes("Offline copy"),
+    "and the centres are labelled as an offline copy: " + await txt(p, "c-offline"));
+  await ok(await p.evaluate(countRows, "#c-list .c-item") > 0,
+    "and they are readable: " + await p.evaluate(countRows, "#c-list .c-item") + " centres");
+  await p.context().close();
+  CUR = null;
+
   await ok(errs.length === 0, "no page errors " + JSON.stringify(errs));
   await ok(state.emailCall === null, "Supabase was never asked to send a confirmation or reset e-mail");
   await browser.close(); srv.close();
