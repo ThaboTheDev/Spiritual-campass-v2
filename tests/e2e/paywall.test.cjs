@@ -199,7 +199,9 @@ const centres = { regions: REGIONS, centres: CENTRES };
   ok(await vis(p, "m-forcepw"), "must_change_password shows the blocking screen");
   ok(!(await vis(p, "m-auth")) && !(await vis(p, "m-account")) && !(await vis(p, "m-paywall")) && !(await vis(p, "m-welcome")), "nothing else is reachable");
   ok(!(await vis(p, "m-close")) && await vis(p, "m-signout"), "the only other action is Sign out");
+  ok(!(await vis(p, "m-pw-cur")), "only a new password is asked for, not the current one");
   await p.fill("#m-fp-pw", "Brandnew1"); await p.fill("#m-fp-pw2", "Brandnew1"); await p.click("#m-fp-go"); await p.waitForTimeout(1200);
+  ok(state.newPassword === "Brandnew1", "the password that was typed is the one that was sent");
   ok(!(await vis(p, "m-forcepw")), "after the change the member continues");
   ok(!(await vis(p, "member")), "and the app is open");
   await p.evaluate(() => document.getElementById("tab-centres").click()); await p.waitForTimeout(500);
@@ -311,6 +313,20 @@ const centres = { regions: REGIONS, centres: CENTRES };
   ok(await vis(p, "m-modal"), "delete asks first");
   await p.click("#m-modal-ok"); await p.waitForTimeout(500);
   ok(!!state.deletedCentre, "and then deletes");
+  await p.context().close();
+
+  // 14. cancel a subscription: two taps, and the API is really called
+  state.me = active(); state.cancelled = 0;
+  p = await newPage(`localStorage.setItem("tshk-session", ${JSON.stringify(saved)});localStorage.setItem("tshk-welcome", ${JSON.stringify(seen)});`);
+  await p.goto(srv.url + "/"); await p.waitForTimeout(800);
+  await p.click("#acct"); await p.waitForTimeout(300);
+  ok(!(await vis(p, "m-acct-pay")), "an active member is not offered Pay now");
+  ok(await vis(p, "m-cancel"), "and can cancel");
+  await p.click("#m-cancel"); await p.waitForTimeout(300);
+  ok(state.cancelled === 0 && (await txt(p, "m-cancel")).includes("Tap again"), "the first tap only arms it");
+  await p.click("#m-cancel"); await p.waitForTimeout(800);
+  ok(state.cancelled === 1, "the second tap calls /api/payfast/cancel");
+  ok((await txt(p, "m-msg")).includes("cancelled"), "and the member is told it is done: " + await txt(p, "m-msg"));
   await p.context().close();
 
   ok(errs.length === 0, "no page errors " + JSON.stringify(errs));
