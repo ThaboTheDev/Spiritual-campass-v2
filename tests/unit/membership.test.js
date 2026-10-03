@@ -103,7 +103,10 @@ function server(state) {
       return resp(200, { ok: true, email: "bob@example.org", subscription_cancelled: true });
     }
     if (u.startsWith("/api/admin/centres")) {
-      if (method === "GET") return resp(200, state.adminCentres || CENTRES);
+      if (method === "GET") {
+        if (state.adminCentresStatus) return resp(state.adminCentresStatus.status, state.adminCentresStatus.body);
+        return resp(200, state.adminCentres || CENTRES);
+      }
       if (method === "POST") {
         if (!body.name) return resp(400, { error: "name_required" });
         if (body.lat === null && body.lng !== null) return resp(400, { error: "coordinates_invalid" });
@@ -568,6 +571,36 @@ test("admin: a 401 on an admin call signs out; a 403 is explained", async () => 
   await wait(6);
   b.click("acct"); await wait(2); b.click("m-admin-open"); await wait(4);
   assert.equal(b.txt("m-msg").includes("admins"), true, "403 admin_only message: " + b.txt("m-msg"));
+  b.close();
+
+  // the 401 half of that name was never actually exercised
+  const b2 = await boot({ me: adminMe, seed: adminSeed, state: { adminStatus: { status: 401, body: { error: "sign_in_required" } } } });
+  await wait(6);
+  b2.click("acct"); await wait(2); b2.click("m-admin-open"); await wait(4);
+  assert.equal(b2.visible("m-signin"), true, "a 401 on the member list signs out locally");
+  assert.equal(b2.localStorage.getItem("tshk-session"), null, "and clears the session");
+  b2.close();
+
+  // same for the admin centres list, which has its own 401 branch
+  const b3 = await boot({ me: adminMe, seed: adminSeed, state: { adminUsers: ADMINS, adminCentresStatus: { status: 401, body: { error: "sign_in_required" } } } });
+  await wait(6);
+  b3.click("acct"); await wait(2); b3.click("m-admin-open"); await wait(3);
+  b3.click("m-adm-tab-centres"); await wait(4);
+  assert.equal(b3.visible("m-signin"), true, "a 401 on the centres list signs out locally");
+  assert.equal(b3.localStorage.getItem("tshk-session"), null, "and clears the session");
+  b3.close();
+});
+
+test("a 401 from /api/centres signs the member out locally", async () => {
+  const b = await boot({
+    seed: { "tshk-session": sess(), "tshk-welcome": JSON.stringify({ "member@example.org": true }) },
+    state: { centresStatus: { status: 401, body: { error: "sign_in_required" } } }
+  });
+  await wait(6);
+  b.click("tab-centres"); await wait(4);
+  assert.equal(b.visible("m-signin"), true, "an expired session sends the member back to sign-in");
+  assert.equal(b.localStorage.getItem("tshk-session"), null, "the session is cleared");
+  assert.deepEqual(b.errors, [], "no page errors");
   b.close();
 });
 
