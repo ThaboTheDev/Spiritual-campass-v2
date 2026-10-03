@@ -120,15 +120,17 @@ Nothing in this flow sends an e-mail — not the app, not Supabase.
 `.github/workflows/tests.yml` runs on every push and pull request to `main`, on
 Ubuntu with Node 22, PHP 8.2 and a real Chromium:
 
-- **Unit and API: 97 tests, 0 skipped.** PHP is installed, so the six tests that
+- **Unit and API: 100 tests, 0 skipped.** PHP is installed, so the six tests that
   compare the Node signing code against PayFast's own PHP reference
   (`tests/unit/php-reference.php`) byte for byte all run and pass — the
-  checkout, ITN and API signatures included. Three of them cover things that
-  fail quietly: the 20 s ceiling on every call (the button is disabled while the
-  call is in flight, then the abort timer re-enables it and the member is told
-  why), the 15-minute re-check of `/api/me`, and the web app manifest — its
-  required fields, that `index.html` links it, that every icon it names is a real
-  PNG, and that each file's true pixel size matches the size declared beside it.
+  checkout, ITN and API signatures included. Several cover things that fail
+  quietly: the 20 s ceiling on every call (the button is disabled while the call
+  is in flight, then the abort timer re-enables it and the member is told why),
+  the 15-minute re-check of `/api/me`, the web app manifest — its required
+  fields, that `index.html` links it, that every icon it names is a real PNG, and
+  that each file's true pixel size matches the size declared beside it — and the
+  entitlement states the server actually emits (`past_due`, `expired`,
+  `cancelled`).
 - **Browser: 88 assertions.** `tests/e2e/paywall.test.cjs` drives the whole
   membership flow in Chromium against a mocked backend: sign-up with no
   confirmation e-mail, the one-time welcome page, the paywall and the signed
@@ -172,6 +174,8 @@ automated tests in this repository could **not** prove:
   the PWA install prompt itself. Check those on a phone.
 - **The 378 Portuguese, Chichewa and iciBemba strings need a native speaker.**
   See `docs/translations-to-review.md`.
-- **Grace-period rendering is defensive.** The client shows a "payment is late"
-  message for `state: "grace"`, but `api/_lib/entitlement.js` does not currently
-  produce that value. The wording is untested against a real late payment.
+- **The `grace` branch is defensive.** The client renders a "payment is late"
+  message for `state: "grace"`, but `api/_lib/entitlement.js` never returns that
+  value — a late payment comes back as `past_due`, and that path **is** tested.
+  The `grace` wording therefore cannot be exercised by a real payment; it is left
+  in place in case the server starts emitting it.
