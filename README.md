@@ -18,7 +18,7 @@ compass works). This README covers the membership system.
 ```
 Phone (public/)                          Vercel functions (api/)                   Services
 ───────────────                          ───────────────────────                   ────────
-member.js ── email code ─────────────────────────────────────────────────────────► Supabase Auth
+member.js ── email + password ───────────────────────────────────────────────────► Supabase Auth
 member.js ── GET /api/me ──────────────► me.js: create member + trial, return access ──► Supabase DB
 app.js    ── GET /api/centres ─────────► centres.js: only if access (402 otherwise)
 member.js ── POST /api/payfast/checkout► checkout.js: signed PayFast form
@@ -47,10 +47,20 @@ api/
   payfast/checkout.js    POST → signed PayFast subscription form
   payfast/notify.js      POST ← PayFast ITN (payment notifications)
   payfast/cancel.js      POST → cancel via PayFast API
+  account/change-password.js  POST → change own password (current password required unless an admin reset it)
+  admin/users.js         GET  → members for the admin list (admins only)
+  admin/reset-password.js     POST → set a temporary password, returned once, forced change at next sign-in
+  admin/delete-user.js   POST → cancel the subscription first, then delete the account
+  admin/centres.js       GET/POST/PATCH/DELETE → centre directory (admins only)
   _lib/                  env, http, supabase, entitlement, payfast signing/verification, ITN logic, centres data (not routes)
 supabase/schema.sql      Tables, security policies, admin view
-tests/unit/              29 tests: signatures vs PayFast PHP reference, ITN rules, entitlement, full API cycle
-tests/e2e/               Browser test of every membership screen (backend mocked)
+supabase/seed_centres.sql     The 88 centres (no rows are inserted by the schema)
+vercel.json              Output directory public/, Node runtime
+tests/unit/              API tests (signatures vs the PayFast PHP reference, ITN rules, entitlement,
+                         full API cycle) plus membership.test.js, which runs the real public/ files
+                         in jsdom against a mocked Supabase and /api/*
+tests/e2e/               The same membership flows in a real browser (Playwright, backend mocked)
+docs/                    translations-to-review.md, payfast-sandbox-checklist.md
 .env.example             Every environment variable, explained
 ```
 
@@ -61,7 +71,9 @@ No npm packages are needed at runtime: the functions use Node 18+ built-ins (`fe
 ### 1. Supabase (accounts and database)
 1. Create a project at https://supabase.com (choose a region close to South Africa, for example `eu-west` or `af-south` if offered).
    For production use a paid plan; free projects may be paused when inactive.
-2. **SQL Editor** → paste and run `supabase/schema.sql`.
+2. **SQL Editor** → paste and run `supabase/schema.sql`, then `supabase/seed_centres.sql`.
+   The seed holds the 88 centres; the schema itself inserts no rows, so without it the Centres
+   tab is empty until you add centres by hand. The seed is safe to run again.
 3. **Authentication → Providers → Email**: enabled, **"Confirm email" OFF** (so signing up creates the account at once and Supabase sends nothing),
    minimum password length 8. Leave **Project Settings → Auth → SMTP** empty: this app needs no mail server.
 4. **Authentication → URL Configuration**: Site URL = your app address (nothing else is needed).
@@ -132,10 +144,24 @@ update members set trial_ends_at = now() + interval '7 days' where email = 'some
 ## Tests
 ```bash
 npm install
-npm test                      # unit + API tests (PHP on the PATH enables the PayFast reference comparisons)
+npm test                      # API tests + the membership layer in jsdom; no browser needed
+                              # (PHP on the PATH also enables the PayFast reference comparisons)
 npx playwright install chromium
-npm run test:e2e              # membership screens in a real browser, backend mocked
+npm run test:e2e              # the same membership flows in a real browser, backend mocked
 ```
+
+`.github/workflows/tests.yml` runs both on every push and pull request to `main`, on Ubuntu with
+Node 22, PHP 8.2 and Chromium — so the PayFast signature comparisons run rather than skip, and the
+browser suite really executes. The last run reported **103 unit/API tests passing (0 skipped)** and
+**88 browser assertions passing**. Node 22 is deliberate: jsdom 30 declares
+`engines: ^22.22.2 || ^24.15.0 || >=26`, and since npm does not enforce `engines`, Node 20 installs
+cleanly and then fails at import time.
+
+`npm test` covers the gate end to end without a browser: sign-up and sign-in, the one-time welcome
+page, the paywall, `?payment=success` polling, the forced password change, 402/403 from `/api/centres`,
+the offline rule against `access_until`, the admin area, and the accessibility and service-worker
+rules. `tests/e2e/paywall.test.cjs` repeats it in Chromium; `npm test` also checks that every selector
+in that file still matches the shipped DOM, so the two cannot drift apart silently.
 
 ## Changing the price or trial
 Set `SUBSCRIPTION_AMOUNT` and `TRIAL_DAYS` in Vercel, and update `PRICE_LABEL` / `TRIAL_DAYS` in `public/config.js` (display only).
@@ -152,8 +178,9 @@ never locks out existing subscribers; only new sign-ups pay the new price.
 
 ## Password sign-in, admin area and centres in the database
 
-Members sign in with **e-mail + password** (Supabase Auth). The sign-in, sign-up, confirm-e-mail and forgot-password calls go straight to
-Supabase from the app; everything else goes through this API.
+Members sign in with **e-mail + password** (Supabase Auth). Only two calls go straight to Supabase from the app — `signup` and
+`token?grant_type=password` (plus the refresh); there is no confirm-e-mail call and no forgot-password call, because this app sends no
+e-mail. Everything else goes through this API.
 
 **Set up (once)**
 1. Supabase → SQL editor: run `supabase/schema.sql`, then `supabase/seed_centres.sql` (88 centres).

@@ -101,6 +101,7 @@ var REGIONS=[],CENTRES=[];
     let r=await fetch("/api/centres",{headers:{Authorization:"Bearer "+s.access_token}});
     if(r.status===401){msg('Your sign-in has expired. Open <a style="color:#e2b64a" href="/">the app</a> once to refresh it, then reload this page.');return;}
     if(r.status===402){msg("A TSHK Compass membership is needed to show the centres dashboard.");return;}
+    if(r.status===403){msg('Your password has to be changed first. Open <a style="color:#e2b64a" href="/">the app</a>, choose a new password, then reload this page.');return;}
     const data=await r.json();REGIONS=data.regions;CENTRES=data.centres;window.__startDashboard();
   }catch(e){msg("Could not load the centres. Check the internet connection and reload.");}
 })();

@@ -4,6 +4,9 @@ const TARGET={lat:-29.07547,lon:27.62453,name:"Ekuphumuleni"};
 /* ---------- State ---------- */
 const S={loc:null,heading:null,dispDial:0,dispPtr:0,declination:0,bearing:null,distKm:null,sensor:"off",aligned:false,beta:0,gamma:0,lastEvt:0,chip:null,sunWhy:null};
 const $=id=>document.getElementById(id);
+/* The membership gate (member.js) decides who may use the app. Nothing here touches a sensor or the
+   GPS until it says access is granted - the overlay also covers the screen, this is the second lock. */
+const locked=()=>typeof MEMBER!=="undefined"&&MEMBER.hasAccess===false;
 
 let LANG="zu";
 function T(key,vars){let t=(LANGS[LANG]||{})[key]||"";if(vars)for(const k in vars)t=t.split("{"+k+"}").join(vars[k]);return t;}
@@ -71,6 +74,7 @@ function renderReadouts(){
   const tm=document.getElementById("target-mark");if(tm)tm.setAttribute("transform",`rotate(${S.bearing.toFixed(2)} 100 100)`);
 }
 function requestGPS(){
+  if(locked())return;                                  // no geolocation before the member has access
   if(!navigator.geolocation){$("gps-note").textContent="This browser has no location service. Choose a town or type coordinates.";return;}
   $("gps-note").textContent=bi("Finding your position…",T("gps_finding"));
   navigator.geolocation.getCurrentPosition(p=>{
@@ -225,6 +229,7 @@ function startAbsoluteSensor(){
 function setChipCmp(cls,t,key){S.chip=[cls,t,key];$("chip-cmp").className="chip "+cls;$("chip-cmp-t").textContent=bi(t,key?T(key):"");}
 function showNoCompass(){$("nocompass").hidden=false;$("suncard").hidden=false;renderSunWhy();renderSun();render();}
 function startSensors(){
+  if(locked())return;                                  // no sensors before the member has access
   if(S.started)return;S.started=true;
   const listen=()=>{
     if("ondeviceorientationabsolute" in window)window.addEventListener("deviceorientationabsolute",onOrientation,true);
@@ -379,6 +384,7 @@ $("c-search").addEventListener("input",applySearch);
 $("btn-near").addEventListener("click",()=>{
   const go=(lat,lon)=>{C.user={lat,lon};const list=allCentres().sort((a,b)=>a.km-b.km).slice(0,8);$("c-search").value="";$("c-status").textContent=bi("The 8 centres closest to you",T("nearest8"));renderCentres(list,"near");if(C.map){C.map.setView([lat,lon],9);L.circleMarker([lat,lon],{radius:7,color:"#fff",weight:2,fillColor:"#2f7a4a",fillOpacity:1}).addTo(C.map).bindPopup(esc(bi("You are here",T("here"))));}};
   if(S.loc&&S.loc.source==="gps"){go(S.loc.lat,S.loc.lon);}
+  else if(locked()){$("c-status").textContent=bi("Please sign in first",T("auth_needed"));}
   else if(navigator.geolocation){$("c-status").textContent="Finding your position…";navigator.geolocation.getCurrentPosition(p=>go(p.coords.latitude,p.coords.longitude),()=>{if(S.loc)go(S.loc.lat,S.loc.lon);else $("c-status").textContent="Location not available. Allow GPS, or set a town under Location, then try again.";},{enableHighAccuracy:true,timeout:15000,maximumAge:60000});}
   else if(S.loc)go(S.loc.lat,S.loc.lon);
 });

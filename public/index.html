@@ -33,6 +33,7 @@ img{max-width:100%}
   --ink:#171c2a; --ink-2:#4f5666; --ink-3:#7d8494;
   --accent:#1f4c9c; --accent-ink:#ffffff; --accent-soft:#e3eaf7;
   --gold:#b8891f; --gold-soft:#f5ecd6; --ok:#2f7a4a; --ok-soft:#dff0e3; --warn:#9a6a10; --warn-soft:#f7ebcf;
+  --danger:#8f2c2c; --danger-ink:#ffffff; --scrim:rgba(18,28,48,.55);
   --dial:#fafbfd; --dial-ring:#dde2ea; --tick:#a7aebc; --tick-major:#3b4358;
   --shadow:0 10px 30px rgba(20,35,70,.10);
   --f-display:"Newsreader",Georgia,"Times New Roman",serif;
@@ -45,6 +46,7 @@ img{max-width:100%}
     --ink:#eef1f7; --ink-2:#b5bccb; --ink-3:#7f8899;
     --accent:#6f9ce6; --accent-ink:#0f1a2e; --accent-soft:#1c2a45;
     --gold:#d9ad3f; --gold-soft:#3a3016; --ok:#6cc48a; --ok-soft:#1d3426; --warn:#e0b04a; --warn-soft:#3a2f14;
+    --danger:#d06a6a; --danger-ink:#2a0f0f; --scrim:rgba(0,0,0,.72);
     --dial:#1a2130; --dial-ring:#313b4f; --tick:#5f6a80; --tick-major:#e2e7f0;
     --shadow:0 10px 30px rgba(0,0,0,.45);
   }
@@ -54,6 +56,7 @@ img{max-width:100%}
   --ink:#eef1f7; --ink-2:#b5bccb; --ink-3:#7f8899;
   --accent:#6f9ce6; --accent-ink:#0f1a2e; --accent-soft:#1c2a45;
   --gold:#d9ad3f; --gold-soft:#3a3016; --ok:#6cc48a; --ok-soft:#1d3426; --warn:#e0b04a; --warn-soft:#3a2f14;
+  --danger:#d06a6a; --danger-ink:#2a0f0f; --scrim:rgba(0,0,0,.72);
   --dial:#1a2130; --dial-ring:#313b4f; --tick:#5f6a80; --tick-major:#e2e7f0;
   --shadow:0 10px 30px rgba(0,0,0,.45);
 }
@@ -209,16 +212,33 @@ nav.tabs .inner{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;width:1
 .toprow .langsel{margin-top:0}
 .acct{appearance:none;border:1px solid var(--line);background:var(--accent-soft);color:var(--accent);border-radius:999px;padding:4px 10px;font:inherit;font-size:12px;font-weight:600;cursor:pointer}
 body.locked{overflow:hidden}
-.member{position:fixed;inset:0;z-index:50;background:var(--bg);overflow:auto;display:flex;align-items:flex-start;justify-content:center;padding:calc(24px + env(safe-area-inset-top,0px)) 16px 24px}
+/* while the gate is up the app is not visible, not clickable and not reachable with the keyboard */
+body.locked .app,body.locked .tabs{visibility:hidden}
+.member{position:fixed;inset:0;z-index:50;background:var(--bg);overflow:auto;display:flex;align-items:flex-start;justify-content:center;padding:calc(24px + env(safe-area-inset-top,0px)) 16px calc(24px + env(safe-area-inset-bottom,0px))}
 .m-card{width:100%;max-width:420px;background:var(--surface);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);padding:22px 18px;display:flex;flex-direction:column;gap:12px;margin-top:4vh}
+.m-card.wide{max-width:620px}
 .m-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .m-logo{width:58px;height:auto}
 .m-card h2{margin:0;font-family:var(--f-display);font-weight:500;font-size:24px;line-height:1.2}
 .m-sub{margin:0;color:var(--ink-2);font-size:14px}
 .m-card form{display:flex;flex-direction:column;gap:8px}
 .m-card label{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);font-weight:500}
-.m-card input{width:100%;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:10px;padding:12px;font:inherit;font-size:16px}
-#m-code{letter-spacing:.3em;font-family:var(--f-mono);font-size:22px;text-align:center}
+.m-card input,.m-card select{width:100%;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:10px;padding:12px;font:inherit;font-size:16px;min-height:44px}
+.m-card input[type=checkbox]{width:auto;min-height:0;padding:0}
+.m-card .btn,.m-card .linkbtn,.m-modal-card .btn{min-height:44px}
+.m-card .linkbtn{padding:12px 4px}
+.m-tabs{display:flex;gap:6px;background:var(--surface-2);border-radius:12px;padding:4px;margin-bottom:4px}
+.m-tab{flex:1;appearance:none;border:0;background:none;border-radius:9px;padding:10px 6px;min-height:44px;font:inherit;font-size:14px;font-weight:600;color:var(--ink-2);cursor:pointer}
+.m-tab.active{background:var(--surface);color:var(--accent);box-shadow:var(--shadow)}
+.m-rules{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+.m-rules li{font-size:12px;color:var(--ink-3)}
+.m-rules li:before{content:"○ ";font-size:11px}
+.m-rules li.ok{color:var(--ok)}
+.m-rules li.ok:before{content:"✓ "}
+.m-rules li.bad{color:var(--warn)}
+.m-rules li.bad:before{content:"✕ "}
+.m-feats{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:14px;color:var(--ink-2)}
+.m-price-line{margin:0;font-size:14px;color:var(--ink-2)}
 .m-price{display:flex;align-items:baseline;gap:6px;justify-content:center;color:var(--ink-2)}
 .m-price b{font-family:var(--f-mono);font-size:34px;color:var(--ink)}
 .m-state{margin:0;font-weight:600}
@@ -226,6 +246,37 @@ body.locked{overflow:hidden}
 .m-foot{display:flex;justify-content:space-between;gap:10px}
 .linkbtn{appearance:none;background:none;border:0;color:var(--accent);font:inherit;font-size:14px;font-weight:600;cursor:pointer;padding:6px 0}
 .m-fine{font-size:12px;color:var(--ink-3);margin:0;text-align:center}
+.m-box{border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.m-box summary{cursor:pointer;font-weight:600;font-size:14px;min-height:24px}
+.m-box form{margin-top:10px}
+.m-legend{margin:0 0 6px;font-weight:600;font-size:14px}
+.m-cols{display:flex;gap:8px}
+.m-cols>div{flex:1;min-width:0}
+.m-check{display:flex!important;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-size:14px;color:var(--ink)}
+.m-row{display:flex;gap:8px}
+.m-row .btn{flex:1}
+.m-list{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.m-row-card{border:1px solid var(--line);border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:6px}
+.m-row-email{font-weight:600;font-size:14px;word-break:break-all}
+.m-row-meta{font-size:12px;color:var(--ink-3);display:flex;flex-wrap:wrap;gap:4px 10px}
+.m-flags{color:var(--gold)}
+.m-flag-unverified{font-size:11px;color:var(--warn);margin-left:6px}
+.m-acts{display:flex;gap:8px;flex-wrap:wrap}
+.m-acts .btn{flex:1 1 140px;width:auto;padding:10px 12px;font-size:13px}
+.m-empty{font-size:13px;color:var(--ink-3);padding:6px 0}
+#c-retry{width:auto;padding:10px 14px;margin:0 0 10px}
+.m-retry-inline{margin-top:4px}
+.m-group-t{font-weight:600;font-size:13px;margin:8px 0 6px;color:var(--ink-2)}
+.btn.danger{background:var(--danger);color:var(--danger-ink)}
+.m-modal{position:fixed;inset:0;z-index:60;background:var(--scrim);display:flex;align-items:center;justify-content:center;padding:20px 16px calc(20px + env(safe-area-inset-bottom,0px))}
+.m-modal-card{width:100%;max-width:420px;background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);padding:20px 18px;display:flex;flex-direction:column;gap:10px;max-height:90vh;overflow:auto}
+.m-modal-card h3{margin:0;font-family:var(--f-display);font-weight:500;font-size:20px}
+.m-modal-p{margin:0;font-size:14px;color:var(--ink-2)}
+.m-modal-card input{width:100%;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:10px;padding:12px;font:inherit;font-size:16px;min-height:44px}
+.m-pwrow{display:flex;align-items:center;gap:10px}
+.m-pwrow code{flex:1;font-family:var(--f-mono);font-size:20px;letter-spacing:.06em;background:var(--gold-soft);color:var(--ink);border-radius:10px;padding:12px 10px;word-break:break-all;user-select:all}
+.m-pwrow .m-copy{width:auto;flex:0 0 auto;padding:12px 14px}
+@media (max-width:340px){.m-card{padding:18px 12px}.m-cols{flex-direction:column;gap:8px}}
 </style>
 
 <div class="app">
@@ -356,6 +407,8 @@ body.locked{overflow:hidden}
       <input id="c-search" type="search" placeholder="Search a centre or town" autocomplete="off" aria-label="Search centres">
       <button class="btn quiet" id="btn-near" type="button">Nearest <small data-t="btn_near" data-pre="· "></small></button>
     </div>
+    <p class="note warnbox" id="c-offline" hidden></p>
+    <button class="btn quiet" id="c-retry" type="button" hidden>Try again</button>
     <p class="note" id="c-status">All centres, grouped by region</p>
     <div id="c-list"></div>
   </section>
@@ -388,21 +441,143 @@ body.locked{overflow:hidden}
   </section>
 </div>
 
-<!-- MEMBERSHIP: sign-in, trial, paywall, account (member.js) -->
+<!-- MEMBERSHIP: sign-in gate, forced password change, trial welcome, paywall, account, admin (member.js) -->
 <div class="member" id="member" hidden role="dialog" aria-modal="true" aria-labelledby="m-title">
-  <div class="m-card">
+  <div class="m-card" id="m-card">
     <div class="m-top"><img class="m-logo" src="logo.png" alt="The Spiritual Home Kingdom">
       <label class="langsel"><select id="m-lang" aria-label="Language"><option value="zu">isiZulu</option><option value="pt">Português</option><option value="ny">Chichewa · Chinyanja</option><option value="bem">iciBemba</option><option value="en">English only</option></select></label></div>
     <h2 id="m-title">TSHK Compass</h2>
     <p class="m-sub" id="m-sub"></p>
-    <form id="m-auth-email" hidden novalidate><label for="m-email" id="m-email-l">Your email address</label><input id="m-email" type="email" autocomplete="email" inputmode="email" required><button class="btn primary" id="m-send" type="submit">Send code</button></form>
-    <form id="m-auth-code" hidden novalidate><label for="m-code" id="m-code-l">6-digit code</label><input id="m-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="10" required><button class="btn primary" id="m-verify" type="submit">Sign in</button><button class="btn quiet" id="m-change" type="button">Use a different email</button></form>
-    <div id="m-account" hidden><p class="m-state" id="m-state"></p></div>
-    <div id="m-pay" hidden><div class="m-price"><b id="m-price">R100</b><span>/ month</span></div><button class="btn primary" id="m-subscribe" type="button">Subscribe</button><p class="m-fine">Secure payment by PayFast · cancel any time</p></div>
-    <button class="btn quiet" id="m-cancel" type="button" hidden>Cancel subscription</button>
+
+    <!-- sign in / create account -->
+    <div id="m-auth" hidden>
+      <div class="m-tabs" role="tablist" aria-label="Sign in or create an account">
+        <button class="m-tab active" id="m-tab-in" type="button" role="tab" aria-selected="true" aria-controls="m-signin">Sign in</button>
+        <button class="m-tab" id="m-tab-up" type="button" role="tab" aria-selected="false" aria-controls="m-signup">Create account</button>
+      </div>
+      <form id="m-signin" novalidate>
+        <label for="m-in-email" id="m-in-email-l">Your e-mail address</label>
+        <input id="m-in-email" type="email" autocomplete="username" inputmode="email" spellcheck="false" required>
+        <label for="m-in-pw" id="m-in-pw-l">Password</label>
+        <input id="m-in-pw" type="password" autocomplete="current-password" required>
+        <button class="btn primary" id="m-in-go" type="submit">Sign in</button>
+        <p class="m-fine" id="m-noemail"></p>
+      </form>
+      <form id="m-signup" hidden novalidate>
+        <label for="m-up-email" id="m-up-email-l">Your e-mail address</label>
+        <input id="m-up-email" type="email" autocomplete="username" inputmode="email" spellcheck="false" required>
+        <label for="m-up-pw" id="m-up-pw-l">Password</label>
+        <input id="m-up-pw" type="password" autocomplete="new-password" aria-describedby="m-rules" required>
+        <ul class="m-rules" id="m-rules" aria-live="polite">
+          <li id="m-r1">At least 8 characters</li>
+          <li id="m-r2">At least one letter and one digit</li>
+          <li id="m-r3">72 characters maximum</li>
+        </ul>
+        <label for="m-up-pw2" id="m-up-pw2-l">Repeat password</label>
+        <input id="m-up-pw2" type="password" autocomplete="new-password" required>
+        <button class="btn primary" id="m-up-go" type="submit">Create my account</button>
+        <p class="m-fine" id="m-up-fine"></p>
+      </form>
+    </div>
+
+    <!-- an admin reset this password: a new one is required before anything else -->
+    <form id="m-forcepw" hidden novalidate>
+      <label for="m-fp-pw" id="m-fp-pw-l">New password</label>
+      <input id="m-fp-pw" type="password" autocomplete="new-password" required>
+      <label for="m-fp-pw2" id="m-fp-pw2-l">Repeat password</label>
+      <input id="m-fp-pw2" type="password" autocomplete="new-password" required>
+      <button class="btn primary" id="m-fp-go" type="submit">Save my new password</button>
+    </form>
+
+    <!-- one-time welcome for a new account -->
+    <div id="m-welcome" hidden>
+      <ul class="m-feats" id="m-feats-w"></ul>
+      <p class="m-price-line" id="m-w-price"></p>
+      <button class="btn primary" id="m-w-pay" type="button">Pay now</button>
+      <button class="btn quiet" id="m-w-trial" type="button">Start my free trial</button>
+    </div>
+
+    <!-- no access: the paywall -->
+    <div id="m-paywall" hidden>
+      <p class="m-state" id="m-pw-state" hidden></p>
+      <ul class="m-feats" id="m-feats-p"></ul>
+      <div class="m-price"><b id="m-price">R100</b><span id="m-price-per">/ month</span></div>
+      <button class="btn primary" id="m-subscribe" type="button">Pay now</button>
+      <p class="m-fine" id="m-pay-fine">Secure payment by PayFast · cancel any time</p>
+    </div>
+
+    <!-- account -->
+    <div id="m-account" hidden>
+      <p class="m-state" id="m-state"></p>
+      <button class="btn primary" id="m-acct-pay" type="button" hidden>Pay now</button>
+      <button class="btn quiet" id="m-cancel" type="button" hidden>Cancel subscription</button>
+      <button class="btn quiet" id="m-admin-open" type="button" hidden>Admin</button>
+      <details class="m-box" id="m-pwbox">
+        <summary id="m-pw-sum">Change password</summary>
+        <form id="m-pwform" novalidate>
+          <label for="m-pw-cur" id="m-pw-cur-l">Current password</label>
+          <input id="m-pw-cur" type="password" autocomplete="current-password">
+          <label for="m-pw-new" id="m-pw-new-l">New password</label>
+          <input id="m-pw-new" type="password" autocomplete="new-password">
+          <label for="m-pw-new2" id="m-pw-new2-l">Repeat password</label>
+          <input id="m-pw-new2" type="password" autocomplete="new-password">
+          <button class="btn quiet" id="m-pw-go" type="submit">Change my password</button>
+        </form>
+      </details>
+    </div>
+
+    <!-- admin (the server enforces is_admin; this only reflects it) -->
+    <div id="m-admin" hidden>
+      <div class="m-tabs" role="tablist" aria-label="Admin">
+        <button class="m-tab active" id="m-adm-tab-users" type="button" role="tab" aria-selected="true" aria-controls="m-adm-users">Members</button>
+        <button class="m-tab" id="m-adm-tab-centres" type="button" role="tab" aria-selected="false" aria-controls="m-adm-centres">Centres</button>
+      </div>
+      <div id="m-adm-users">
+        <label for="m-user-q" id="m-user-q-l">Search by e-mail</label>
+        <input id="m-user-q" type="search" autocomplete="off" spellcheck="false" inputmode="email">
+        <div class="m-list" id="m-user-list"></div>
+      </div>
+      <div id="m-adm-centres" hidden>
+        <label for="m-c-filter" id="m-c-filter-l">Region</label>
+        <select id="m-c-filter"><option value="">All regions</option></select>
+        <form class="m-box" id="m-c-form" novalidate>
+          <p class="m-legend" id="m-c-legend">Add centre</p>
+          <label for="m-c-name" id="m-c-name-l">Name</label>
+          <input id="m-c-name" autocomplete="off" required>
+          <label for="m-c-region" id="m-c-region-l">Region</label>
+          <input id="m-c-region" list="m-regions" autocomplete="off" required><datalist id="m-regions"></datalist>
+          <label for="m-c-address" id="m-c-address-l">Address</label>
+          <input id="m-c-address" autocomplete="off">
+          <label for="m-c-town" id="m-c-town-l">Town</label>
+          <input id="m-c-town" autocomplete="off">
+          <label for="m-c-phone" id="m-c-phone-l">Phone</label>
+          <input id="m-c-phone" type="tel" autocomplete="off">
+          <div class="m-cols">
+            <div><label for="m-c-lat" id="m-c-lat-l">Latitude</label><input id="m-c-lat" inputmode="decimal" autocomplete="off"></div>
+            <div><label for="m-c-lng" id="m-c-lng-l">Longitude</label><input id="m-c-lng" inputmode="decimal" autocomplete="off"></div>
+          </div>
+          <label class="m-check" for="m-c-verified"><input id="m-c-verified" type="checkbox" checked><span id="m-c-verified-t">Verified</span></label>
+          <div class="m-row"><button class="btn primary" id="m-c-save" type="submit">Save centre</button><button class="btn quiet" id="m-c-cancel" type="button" hidden>Cancel</button></div>
+        </form>
+        <div class="m-list" id="m-c-list"></div>
+      </div>
+      <button class="btn quiet" id="m-admin-close" type="button">Back to the app</button>
+    </div>
+
     <button class="btn quiet" id="m-retry" type="button" hidden>Try again</button>
     <p class="m-msg" id="m-msg" role="status" aria-live="polite"></p>
     <div class="m-foot"><button class="linkbtn" id="m-signout" type="button" hidden>Sign out</button><button class="linkbtn" id="m-close" type="button" hidden>Close</button></div>
+  </div>
+</div>
+
+<!-- one modal, reused for confirms, the type-to-confirm delete and the one-time password -->
+<div class="m-modal" id="m-modal" hidden>
+  <div class="m-modal-card" role="dialog" aria-modal="true" aria-labelledby="m-modal-title">
+    <h3 id="m-modal-title"></h3>
+    <div id="m-modal-body"></div>
+    <label for="m-modal-input" id="m-modal-input-l" hidden>Type the e-mail to confirm</label>
+    <input id="m-modal-input" hidden autocomplete="off" spellcheck="false">
+    <div class="m-row"><button class="btn primary" id="m-modal-ok" type="button">Confirm</button><button class="btn quiet" id="m-modal-cancel" type="button">Cancel</button></div>
   </div>
 </div>
 

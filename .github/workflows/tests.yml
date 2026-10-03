@@ -1,0 +1,97 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 22, not 20: jsdom 30 declares engines ^22.22.2 || ^24.15.0 || >=26.
+      # npm does not enforce engines, so Node 20 installs fine and then
+      # membership.test.js - the only jsdom consumer - dies at import time,
+      # which reports as one failed file with its ~41 subtests never running.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # The six PayFast signature tests compare the Node code against PayFast's own PHP
+      # reference (tests/unit/php-reference.php). They skip without PHP, so install it:
+      # that comparison is the only proof the signatures validate on PayFast's server.
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          tools: none
+
+      - name: Install
+        run: npm ci
+
+      - name: Confirm PHP is available
+        run: php -v
+
+      # shell: bash gives -eo pipefail; the `set` line is belt-and-braces, because
+      # piping into tee without pipefail makes the step exit with tee's status and
+      # a failing npm test would be reported as a pass.
+      - name: Unit and API tests
+        id: unit
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee /tmp/unit.log
+
+      - name: Surface unit failures
+        if: steps.unit.outcome == 'failure'
+        run: |
+          # Any indentation: a file-level failure nests the real assertion deeper,
+          # and a shallow grep reports only the wrapper.
+          grep -nE "not ok|^\s*(error|actual|expected|code|operator|failureType|stack):" /tmp/unit.log \
+            | head -60 | tr -d '\r' | cut -c1-300 | sed -e 's/%/%25/g' -e 's/^/::error::/'
+          exit 1
+
+      # Reported separately rather than folded into `npm test`, because this is the
+      # one suite that needs a real browser.
+      - name: Browser suite (membership flows, backend mocked)
+        id: e2e
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          npx playwright install --with-deps chromium
+          npm run test:e2e 2>&1 | tee /tmp/e2e.log
+
+      - name: Surface browser failures
+        if: steps.e2e.outcome == 'failure'
+        run: |
+          grep -E "FAIL|state:|failed|Error|TimeoutError" /tmp/e2e.log | head -60 | tr -d '\r' | cut -c1-400 | sed -e 's/%/%25/g' -e 's/^/::error::/'
+          exit 1
+
+      # The counts are the point of the run, so publish them where they can be read
+      # without the log viewer, and keep the raw output as an artifact.
+      - name: Publish results
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "unit:"
+            grep -E "^# (tests|pass|fail|skipped|cancelled|todo)" /tmp/unit.log || true
+            echo "browser:"
+            echo "  assertions passed: $(grep -c '^PASS ' /tmp/e2e.log || true)"
+            echo "  assertions failed: $(grep -c '^FAIL ' /tmp/e2e.log || true)"
+          } | tr -d '\r' | sed -e 's/%/%25/g' -e 's/^/::notice::/'
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs
+          path: |
+            /tmp/unit.log
+            /tmp/e2e.log
+          if-no-files-found: ignore
