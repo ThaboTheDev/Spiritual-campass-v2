@@ -1075,3 +1075,41 @@ test("the 15-minute re-check really re-reads /api/me", async () => {
   assert.deepEqual(b.errors, [], "no page errors");
   b.close();
 });
+
+test("the web app manifest is installable and its icons really exist", async () => {
+  /* A bad manifest fails silently: the install prompt simply never appears, or the
+     installed icon is blank. Check the fields the browser requires, that every icon
+     it names is a real file, and that each file's true pixel size matches the size
+     declared next to it. */
+  const raw = fs.readFileSync(path.join(PUB, "manifest.webmanifest"), "utf8");
+  let m;
+  assert.doesNotThrow(() => { m = JSON.parse(raw); }, "the manifest is valid JSON");
+
+  for (const k of ["name", "short_name", "start_url", "display", "background_color", "theme_color"]) {
+    assert.ok(m[k], k + " is present");
+  }
+  assert.equal(m.display, "standalone", "it opens as its own app, not a browser tab");
+  assert.equal(m.start_url, "/", "start_url is the app root");
+  assert.equal(m.scope, "/", "scope covers the whole app");
+
+  assert.match(HTML, /<link[^>]+rel="manifest"[^>]+href="\/manifest\.webmanifest"/,
+    "index.html links the manifest, or no browser will ever read it");
+
+  assert.ok(Array.isArray(m.icons) && m.icons.length >= 2, "at least a 192 and a 512 icon");
+  const PNG_SIG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const pngSize = (f) => {
+    const b = fs.readFileSync(f);
+    assert.ok(b.subarray(0, 8).equals(PNG_SIG), path.basename(f) + " is really a PNG");
+    return b.readUInt32BE(16) + "x" + b.readUInt32BE(20);      // IHDR width/height
+  };
+  const purposes = [];
+  for (const ic of m.icons) {
+    const file = path.join(PUB, ic.src.replace(/^\//, ""));
+    assert.ok(fs.existsSync(file), ic.src + " is declared but the file is missing");
+    assert.equal(ic.type, "image/png", ic.src + " declares its type");
+    assert.equal(pngSize(file), ic.sizes, ic.src + " declares " + ic.sizes + " but the pixels are " + pngSize(file));
+    purposes.push(ic.purpose);
+  }
+  assert.ok(purposes.includes("maskable"), "a maskable icon exists, so Android adaptive icons are not cropped badly");
+  assert.ok(m.icons.some((i) => i.sizes === "192x192"), "a 192px icon exists, the smallest size Chrome installs");
+});
