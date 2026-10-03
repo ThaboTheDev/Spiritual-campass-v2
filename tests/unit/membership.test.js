@@ -803,3 +803,33 @@ test("the service worker refuses to cache the API, auth, PayFast and the one-use
   assert.ok(cacheStore.cached.some((k) => k.endsWith("/index.html")), "the shell goes into the cache: " + JSON.stringify(cacheStore.cached));
   assert.equal(cacheStore.cached.some((k) => k.includes("/api/")), false, "and no API response ever does");
 });
+
+test("a failed centres load says so and offers a retry that works", async () => {
+  const b = await boot({ seed: { "tshk-session": sess(), "tshk-welcome": JSON.stringify({ "member@example.org": true }) }, state: { centresStatus: { status: 500, body: { error: "server_error" } } } });
+  await wait(8);
+  assert.equal(b.ev("CENTRES.length"), 0, "no centres");
+  b.click("tab-centres"); await wait(2);                       // the note lives in the Centres tab
+  assert.equal(b.el("c-offline").hidden, false, "the centres tab explains it");
+  assert.equal(b.txt("c-offline").includes("not available right now"), true, "message: " + b.txt("c-offline"));
+  assert.equal(b.el("c-retry").hidden, false, "with a retry button");
+  assert.equal(b.visible("member"), false, "the rest of the app still works");
+  b.state.centresStatus = null;
+  b.click("c-retry"); await wait(8);
+  assert.equal(b.ev("CENTRES.length"), 2, "the retry loads the centres");
+  assert.equal(b.el("c-offline").hidden, true, "and the note goes away");
+  b.close();
+});
+
+test("a failed admin list load offers a retry that works", async () => {
+  const b = await boot({ me: adminMe, seed: adminSeed, state: { adminStatus: { status: 500, body: { error: "server_error" } } } });
+  await wait(6);
+  b.click("acct"); await wait(2); b.click("m-admin-open"); await wait(5);
+  assert.equal(b.el("m-user-list").textContent.includes("Could not load"), true, "the list explains the failure");
+  const retry = b.el("m-user-list").querySelector(".m-retry-inline");
+  assert.ok(retry, "a retry button is in the list");
+  b.state.adminStatus = null; b.state.adminUsers = ADMINS;
+  retry.dispatchEvent(new b.win.MouseEvent("click", { bubbles: true }));
+  await wait(6);
+  assert.equal(b.el("m-user-list").querySelectorAll(".m-row-card").length, 3, "the retry loads the members");
+  b.close();
+});

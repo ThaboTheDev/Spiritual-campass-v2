@@ -402,13 +402,17 @@ const MEMBER = (function () {
   function centresFromCache() {
     const d = store.get(CKEY);
     if (d && Array.isArray(d.centres) && d.centres.length) {
-      centreNote(two("Offline copy", "offline_copy"));
+      centreNote(two("Offline copy", "offline_copy"), true);
       if (typeof setCentres === "function") setCentres(d);
     } else {
-      centreNote(two("The centres list is not available right now. The compass and the sun guide still work.", "c_unavailable"));
+      centreNote(two("The centres list is not available right now. The compass and the sun guide still work.", "c_unavailable"), true);
     }
   }
-  function centreNote(msg) { const n = el("c-offline"); if (!n) return; n.textContent = msg || ""; n.hidden = !msg; }
+  function centreNote(msg, canRetry) {
+    const n = el("c-offline"), b = el("c-retry");
+    if (n) { n.textContent = msg || ""; n.hidden = !msg; }
+    if (b) b.hidden = !(msg && canRetry);
+  }
 
   /* ================= actions ================= */
   const goodEmail = (v) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v);
@@ -601,6 +605,13 @@ const MEMBER = (function () {
     el("m-adm-tab-centres").classList.toggle("active", !adminUsersTab);
   }
   const row = (cls, text) => { const d = document.createElement("div"); if (cls) d.className = cls; if (text !== undefined) d.textContent = text; return d; };
+  function retryButton(fn) {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "btn quiet m-retry-inline";
+    b.textContent = two("Try again", "retry");
+    b.addEventListener("click", () => { Promise.resolve(fn()).catch(() => {}); });
+    return b;
+  }
   function loadUsers() {
     const list = el("m-user-list");
     if (!list.dataset.busy) { list.dataset.busy = "1"; list.textContent = ""; list.appendChild(row("m-empty", two("Loading…", "loading"))); }
@@ -610,12 +621,22 @@ const MEMBER = (function () {
       list.textContent = "";
       if (r.status === 401) { signOutLocal(); return show("signin"); }
       if (r.status === 403) { say(errText(await readErr(r))); if ((await readErr(r)) === "password_change_required") show("forcepw"); return; }
-      if (!r.ok) { say(errText(await readErr(r))); list.appendChild(row("m-empty", two("Could not load the members.", "admin_load_fail"))); return; }
+      if (!r.ok) {
+        say(errText(await readErr(r)));
+        list.appendChild(row("m-empty", two("Could not load the members.", "admin_load_fail")));
+        list.appendChild(retryButton(loadUsers));
+        return;
+      }
       const d = await r.json();
       const users = d.users || [];
       if (!users.length) { list.appendChild(row("m-empty", two("No members found", "admin_users_none"))); return; }
       for (const u of users) list.appendChild(userRow(u));
-    }).catch(() => { delete list.dataset.busy; list.textContent = ""; list.appendChild(row("m-empty", networkMsg())); });
+    }).catch(() => {
+      delete list.dataset.busy;
+      list.textContent = "";
+      list.appendChild(row("m-empty", networkMsg()));
+      list.appendChild(retryButton(loadUsers));
+    });
   }
   function userRow(u) {
     const wrap = row("m-row-card");
@@ -753,12 +774,21 @@ const MEMBER = (function () {
     api("/api/admin/centres").then(async (r) => {
       list.textContent = "";
       if (r.status === 401) { signOutLocal(); return show("signin"); }
-      if (!r.ok) { say(errText(await readErr(r))); list.appendChild(row("m-empty", two("Could not load the centres.", "admin_load_fail"))); return; }
+      if (!r.ok) {
+        say(errText(await readErr(r)));
+        list.appendChild(row("m-empty", two("Could not load the centres.", "admin_load_fail")));
+        list.appendChild(retryButton(loadAdminCentres));
+        return;
+      }
       const d = await r.json();
       adminCentres = d.centres || []; adminRegions = d.regions || [];
       paintRegionChoices();
       paintAdminCentres();
-    }).catch(() => { list.textContent = ""; list.appendChild(row("m-empty", networkMsg())); });
+    }).catch(() => {
+      list.textContent = "";
+      list.appendChild(row("m-empty", networkMsg()));
+      list.appendChild(retryButton(loadAdminCentres));
+    });
   }
   function paintRegionChoices() {
     const sel = el("m-c-filter"), keep = sel.value;
@@ -890,6 +920,7 @@ const MEMBER = (function () {
     el("m-modal-ok").addEventListener("click", () => { const o = modal; closeModal(); if (o && o.onOk) Promise.resolve(o.onOk()).catch(() => say(networkMsg())); });
     document.addEventListener("keydown", onModalKey);
     el("m-lang").addEventListener("change", () => { const s = el("lang"); s.value = el("m-lang").value; s.dispatchEvent(new Event("change")); });
+    el("c-retry").addEventListener("click", () => { centreNote(two("Loading…", "loading"), false); loadCentres().catch(() => {}); });
   }
   function start() {
     wire();
@@ -914,6 +945,7 @@ const MEMBER = (function () {
     check,
     get ent() { return ent; },
     get hasAccess() { return granted === true; },
+    reloadCentres() { return loadCentres().catch(() => {}); },
     get view() { return view; }
   };
 })();

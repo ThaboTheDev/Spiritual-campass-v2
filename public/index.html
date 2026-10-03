@@ -264,6 +264,8 @@ body.locked .app,body.locked .tabs{visibility:hidden}
 .m-acts{display:flex;gap:8px;flex-wrap:wrap}
 .m-acts .btn{flex:1 1 140px;width:auto;padding:10px 12px;font-size:13px}
 .m-empty{font-size:13px;color:var(--ink-3);padding:6px 0}
+#c-retry{width:auto;padding:10px 14px;margin:0 0 10px}
+.m-retry-inline{margin-top:4px}
 .m-group-t{font-weight:600;font-size:13px;margin:8px 0 6px;color:var(--ink-2)}
 .btn.danger{background:var(--danger);color:var(--danger-ink)}
 .m-modal{position:fixed;inset:0;z-index:60;background:var(--scrim);display:flex;align-items:center;justify-content:center;padding:20px 16px calc(20px + env(safe-area-inset-bottom,0px))}
@@ -406,6 +408,7 @@ body.locked .app,body.locked .tabs{visibility:hidden}
       <button class="btn quiet" id="btn-near" type="button">Nearest <small data-t="btn_near" data-pre="· "></small></button>
     </div>
     <p class="note warnbox" id="c-offline" hidden></p>
+    <button class="btn quiet" id="c-retry" type="button" hidden>Try again</button>
     <p class="note" id="c-status">All centres, grouped by region</p>
     <div id="c-list"></div>
   </section>
