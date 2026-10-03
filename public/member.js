@@ -224,6 +224,7 @@ const MEMBER = (function () {
       const s = ent && ent.state;
       title.textContent = s === "past_due" || s === "grace" ? two("We have not received this month's payment", "pay_pastdue")
         : s === "expired" ? two("Your membership has ended", "pay_expired")
+        : s === "none" ? two("No active membership", "pay_none")
         : two("Your free trial has ended", "trial_ended");
       sub.textContent = storeBuild ? two("A membership is needed. Please sign in with a member account.", "pay_store")
         : two(`Continue with a monthly membership of ${money()}. Cancel any time.`, "pay_offer", { p: money() });

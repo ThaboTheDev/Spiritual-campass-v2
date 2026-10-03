@@ -120,7 +120,7 @@ Nothing in this flow sends an e-mail — not the app, not Supabase.
 `.github/workflows/tests.yml` runs on every push and pull request to `main`, on
 Ubuntu with Node 22, PHP 8.2 and a real Chromium:
 
-- **Unit and API: 100 tests, 0 skipped.** PHP is installed, so the six tests that
+- **Unit and API: 101 tests, 0 skipped.** PHP is installed, so the six tests that
   compare the Node signing code against PayFast's own PHP reference
   (`tests/unit/php-reference.php`) byte for byte all run and pass — the
   checkout, ITN and API signatures included. Several cover things that fail
@@ -128,9 +128,9 @@ Ubuntu with Node 22, PHP 8.2 and a real Chromium:
   is in flight, then the abort timer re-enables it and the member is told why),
   the 15-minute re-check of `/api/me`, the web app manifest — its required
   fields, that `index.html` links it, that every icon it names is a real PNG, and
-  that each file's true pixel size matches the size declared beside it — and the
-  entitlement states the server actually emits (`past_due`, `expired`,
-  `cancelled`).
+  that each file's true pixel size matches the size declared beside it — and every
+  entitlement state the server actually emits (`trial`, `active`, `cancelled`,
+  `trial_ended`, `past_due`, `expired`, `none`).
 - **Browser: 88 assertions.** `tests/e2e/paywall.test.cjs` drives the whole
   membership flow in Chromium against a mocked backend: sign-up with no
   confirmation e-mail, the one-time welcome page, the paywall and the signed
@@ -179,3 +179,7 @@ automated tests in this repository could **not** prove:
   value — a late payment comes back as `past_due`, and that path **is** tested.
   The `grace` wording therefore cannot be exercised by a real payment; it is left
   in place in case the server starts emitting it.
+- **`state: "none"` needed its own wording.** An account with no row in `members`
+  (one created in the Supabase dashboard, or a sign-up whose insert failed) used
+  to fall through to "Your free trial has ended" — a trial it never had. It now
+  reads "No active membership" in all five languages. Test 94 covers it.

@@ -1154,3 +1154,25 @@ test("cancelled: access continues to the end of the paid month, and the member i
   assert.deepEqual(b.errors, [], "no page errors");
   b.close();
 });
+
+/* state:"none" is what api/_lib/entitlement.js returns when there is no row in
+   `members` at all — an account created in the Supabase dashboard, or a sign-up
+   whose members-row insert failed. Such a member has never had a trial, so
+   blaming the trial on them is a lie; the wording has to say there is simply no
+   membership on the account. */
+test("none: an account with no membership record is not told its trial ended", async () => {
+  const b = await boot({ me: {
+    email: "member@example.org", status: "none", access: false, state: "none",
+    is_admin: false, must_change_password: false, can_cancel: false,
+    price: "100.00", currency: "ZAR", trial_days: 7
+  } });
+  b.fill("m-in-email", "member@example.org"); b.fill("m-in-pw", "Trialpass1");
+  b.submit("m-signin"); await wait(6);
+  assert.equal(b.visible("m-paywall"), true, "the paywall is up, not the app");
+  assert.equal(b.ev("MEMBER.hasAccess"), false, "no access without a membership row");
+  assert.equal(b.txt("m-title").includes("No active membership"), true, "title: " + b.txt("m-title"));
+  assert.equal(b.txt("m-title").includes("trial"), false, "and it is not blamed on a trial they never had: " + b.txt("m-title"));
+  assert.equal(b.txt("m-price").includes("R100"), true, "the price is still offered: " + b.txt("m-price"));
+  assert.deepEqual(b.errors, [], "no page errors");
+  b.close();
+});
