@@ -1,9 +1,9 @@
 # Translations to review
 
-These 125 keys were added to `public/lang.js` for the membership layer (sign-in, trial, paywall,
+These 126 keys were added to `public/lang.js` for the membership layer (sign-in, trial, paywall,
 account and admin). English is always shown by the app; the chosen language sits beneath it.
 
-- **`pt`, `ny` and `bem` are machine-assisted for all 125 keys (375 strings) and need a native speaker.**
+- **`pt`, `ny` and `bem` are machine-assisted for all 126 keys (378 strings) and need a native speaker.**
 - `zu` was written by hand, not machine-translated, but a speaker's check is still welcome.
 - `{n}`, `{p}`, `{d}` and `{e}` are placeholders the app fills in (days, price, date, e-mail).
 - This file is a copy for reviewers: `public/lang.js` is the source. Regenerate it after wording changes.
@@ -29,6 +29,7 @@ account and admin). English is always shown by the app; the chosen language sits
 | `auth_pw_rule_mix` | At least one letter and one digit | Okungenani uhlamvu olulodwa lwegama nenombolo eyodwa | Pelo menos uma letra e um número | Kalata imodzi ndi nambala imodzi | Ilembo limo na nambala imo |
 | `auth_pw_rule_max` | 72 characters maximum | Ubuningi buyizinhlamvu eziwu-72 | Máximo de 72 caracteres | Zilembo zosapitirira 72 | Ifingi ifilembo 72 |
 | `auth_weak_pw` | That password is too weak. Use at least 8 characters with a letter and a digit. | Leyo phasiwedi ibuthakathaka kakhulu. Sebenzisa okungenani izinhlamvu eziwu-8 ezinohlamvu lwegama nenombolo. | Essa palavra-passe é demasiado fraca. Use pelo menos 8 caracteres com uma letra e um número. | Achinswi amenewo ndi ofooka kwambiri. Gwiritsani ntchito zilembo zosachepera 8 zokhala ndi kalata ndi nambala. | Iyo password yafooka sana. Bomfyeni ifilembo ifishafika 8 ifikwete ilembo na nambala. |
+| `auth_config` | This app still needs its Supabase settings before anyone can sign in. Please tell the site owner. | Uhlelo alukagcwaliswa izilungiselelo ze-Supabase. Sicele utshele umnikazi wesayithi. | Esta aplicação ainda precisa das definições do Supabase. Por favor avise o responsável do site. | Pulogalamuyi ikufunikabe makonzedwe a Supabase. Chonde uzitsitse kwa mwini wa tsamba. | Uyu uprogramu ulacili naipanga ifyakonfika fya Supabase. Napapata shibikeni ku mwine site. |
 | `auth_wrong_password` | Wrong e-mail or password. Please try again. | I-imeyili noma iphasiwedi ayilungile. Sicela uzame futhi. | Email ou palavra-passe errados. Tente novamente. | Imelo kapena achinswi salondola. Yesaninso. | Imeli nangu ipassword tailungile. Eseni na kabili. |
 | `auth_email_taken` | That e-mail already has an account. Please sign in. | Leyo imeyili isivele ine-akhawunti. Sicela ungene. | Esse email já tem uma conta. Entre, por favor. | Imelo imeneyo ili kale ndi akaunti. Chonde lowani. | Iyo imeli ikwete kale akaunti. Napapata ingileni. |
 | `auth_too_many` | Too many attempts. Please wait a few minutes and try again. | Kuzame kakhulu. Sicela ulinde imizuzu embalwa bese uzama futhi. | Demasiadas tentativas. Aguarde alguns minutos e tente novamente. | Mayesero ambirimbiri. Dikirani mphindi zingapo ndipo yesaninso. | Mwaesha imiku iingi. Napapata loleleni inshita ibanono no kwesha na kabili. |

@@ -17,6 +17,9 @@ var REGIONS = [], CENTRES = [];            // filled from /api/centres once acce
 
 const MEMBER = (function () {
   const CFG = window.TSHK_CONFIG || {};
+  /* A deploy that never edited public/config.js would otherwise show "That did not work",
+     which tells the member nothing. Say what is actually wrong, before any request goes out. */
+  const configured = () => !!(CFG.SUPABASE_URL && CFG.SUPABASE_URL.indexOf("YOUR-PROJECT") < 0);
   const SKEY = "tshk-session", EKEY = "tshk-ent", CKEY = "tshk-centres", WKEY = "tshk-welcome";
   const TIMEOUT = 20000;                   // every network call gives up after 20 s
   /* window.TSHK_TIMING only exists in tests; the defaults below are what the app uses. */
@@ -59,6 +62,7 @@ const MEMBER = (function () {
 
   /* ================= Supabase Auth (REST only) ================= */
   const AUTH_CODES = {
+    not_configured: () => two("This app still needs its Supabase settings before anyone can sign in. Please tell the site owner.", "auth_config"),
     invalid_credentials: () => two("Wrong e-mail or password. Please try again.", "auth_wrong_password"),
     email_not_confirmed: () => two("This account still asks for e-mail confirmation, which this app does not use. Please ask an admin for help.", "auth_confirm_on"),
     user_already_exists: () => two("That e-mail already has an account. Please sign in.", "auth_email_taken"),
@@ -87,6 +91,7 @@ const MEMBER = (function () {
     : two("That did not work. Please try again.", "auth_generic_fail"));
 
   async function authPost(path, body) {
+    if (!configured()) throw Object.assign(new Error(AUTH_CODES.not_configured()), { status: 0, code: "not_configured" });
     const r = await timed((signal) => fetch(`${CFG.SUPABASE_URL}/auth/v1/${path}`, {
       method: "POST",
       headers: { apikey: CFG.SUPABASE_ANON_KEY, "Content-Type": "application/json" },

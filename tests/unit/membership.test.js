@@ -163,7 +163,17 @@ async function boot(opts) {
   await wait(2);                                   // let the document finish parsing
   for (const f of FILES) {
     const s = win.document.createElement("script");
-    s.textContent = o.config && f === "config.js" ? SRC[f].replace(/STORE_BUILD: false/, "STORE_BUILD: " + o.config.STORE_BUILD) : SRC[f];
+    /* config.js ships with a placeholder Supabase URL. Model a deploy that DID configure it, so the
+       suite tests the app and not the placeholder - a test that wants the misconfigured case passes
+       SUPABASE_URL explicitly. */
+    let txt = SRC[f];
+    if (f === "config.js") {
+      const c = o.config || {};
+      txt = txt
+        .replace(/SUPABASE_URL: "[^"]*"/, `SUPABASE_URL: "${c.SUPABASE_URL !== undefined ? c.SUPABASE_URL : "https://tshk-test.supabase.co"}"`)
+        .replace(/STORE_BUILD: false/, "STORE_BUILD: " + !!c.STORE_BUILD);
+    }
+    s.textContent = txt;
     win.document.body.appendChild(s);
   }
   await wait(2);                                   // member.js starts on the next tick
@@ -921,4 +931,28 @@ test("an unknown state from the server is treated defensively", async () => {
   assert.equal(b.visible("member"), true, "a malformed /api/me keeps the gate up");
   assert.deepEqual(b.errors, [], "and does not throw");
   b.close();
+});
+
+test("an unconfigured deploy says so, instead of \"That did not work\"", async () => {
+  // public/config.js ships with a placeholder URL; a deploy that never edits it must not
+  // leave the member with a generic failure and no clue
+  const b = await boot({
+    config: { SUPABASE_URL: "https://YOUR-PROJECT.supabase.co", SUPABASE_ANON_KEY: "", SUPABASE_CLIENT_ID: "", SUPABASE_SCOPE: "", SITE_ORIGIN: "http://localhost", STORE_BUILD: false }
+  });
+  b.fill("m-up-email", "someone@example.org"); b.fill("m-up-pw", "Goodpass1"); b.fill("m-up-pw2", "Goodpass1");
+  b.submit("m-signup"); await wait(6);
+  assert.equal(called(b.calls, /auth\/v1\//).length, 0, "no request goes to a host that is not configured");
+  assert.equal(b.txt("m-msg").includes("Supabase settings"), true, "the member is told what is wrong: " + b.txt("m-msg"));
+  assert.equal(b.visible("member"), true, "and the gate stays up");
+  assert.deepEqual(b.errors, [], "no page errors");
+  b.close();
+
+  // an empty SUPABASE_URL on the sign-in side is the same story
+  const b2 = await boot({ config: { SUPABASE_URL: "", SUPABASE_ANON_KEY: "", SUPABASE_CLIENT_ID: "", SUPABASE_SCOPE: "", SITE_ORIGIN: "http://localhost", STORE_BUILD: false } });
+  b2.fill("m-in-email", "member@example.org"); b2.fill("m-in-pw", "Trialpass1");
+  b2.submit("m-signin"); await wait(6);
+  assert.equal(called(b2.calls, /auth\/v1\//).length, 0, "sign-in does not fire at an empty origin either");
+  assert.equal(b2.txt("m-msg").includes("Supabase settings"), true, "same clear message: " + b2.txt("m-msg"));
+  assert.deepEqual(b2.errors, [], "no page errors");
+  b2.close();
 });
