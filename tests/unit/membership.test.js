@@ -1176,3 +1176,42 @@ test("none: an account with no membership record is not told its trial ended", a
   assert.deepEqual(b.errors, [], "no page errors");
   b.close();
 });
+
+/* A store build must not offer any in-app payment, or the app-store review
+   rejects it. storeBuild gates four separate affordances across three views;
+   the earlier test only asserted the paywall's Subscribe button, so any of the
+   other three could have leaked a PayFast button and stayed green. */
+test("the store build hides every payment affordance, on all three views", async () => {
+  const sess = { "tshk-session": JSON.stringify({ access_token: "t", refresh_token: "r", expires_at: Date.now() + 36e5, email: "member@example.org" }) };
+
+  // paywall
+  const pw = await boot({ config: { STORE_BUILD: true }, me: trial({ access: false, state: "trial_ended" }), seed: sess });
+  await wait(6);
+  assert.equal(pw.visible("m-paywall"), true, "the paywall still shows");
+  assert.equal(pw.el("m-subscribe").hidden, true, "no PayFast button");
+  assert.equal(pw.el("m-pay-fine").hidden, true, "and no price fine print");
+  assert.equal(pw.txt("m-sub").includes("member account"), true, "it says to sign in with a member account: " + pw.txt("m-sub"));
+  assert.deepEqual(pw.errors, [], "no page errors");
+  pw.close();
+
+  // welcome
+  const wc = await boot({ config: { STORE_BUILD: true }, me: trial({ access: true, state: "trial", days_left: 7 }), seed: sess });
+  await wait(6);
+  assert.equal(wc.visible("m-welcome"), true, "the trial welcome still shows");
+  assert.equal(wc.el("m-w-pay").hidden, true, "but its Pay now button is gone");
+  assert.deepEqual(wc.errors, [], "no page errors");
+  wc.close();
+
+  // account
+  const ac = await boot({
+    config: { STORE_BUILD: true },
+    me: trial({ access: true, state: "trial", days_left: 7 }),
+    seed: Object.assign({}, sess, { "tshk-welcome": JSON.stringify({ "member@example.org": true }) })
+  });
+  await wait(6);
+  ac.click("acct"); await wait(3);
+  assert.equal(ac.visible("m-account"), true, "the account screen still opens");
+  assert.equal(ac.el("m-acct-pay").hidden, true, "with no Pay now button on it");
+  assert.deepEqual(ac.errors, [], "no page errors");
+  ac.close();
+});

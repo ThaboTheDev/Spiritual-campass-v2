@@ -120,7 +120,7 @@ Nothing in this flow sends an e-mail — not the app, not Supabase.
 `.github/workflows/tests.yml` runs on every push and pull request to `main`, on
 Ubuntu with Node 22, PHP 8.2 and a real Chromium:
 
-- **Unit and API: 101 tests, 0 skipped.** PHP is installed, so the six tests that
+- **Unit and API: 102 tests, 0 skipped.** PHP is installed, so the six tests that
   compare the Node signing code against PayFast's own PHP reference
   (`tests/unit/php-reference.php`) byte for byte all run and pass — the
   checkout, ITN and API signatures included. Several cover things that fail
@@ -183,3 +183,8 @@ automated tests in this repository could **not** prove:
   (one created in the Supabase dashboard, or a sign-up whose insert failed) used
   to fall through to "Your free trial has ended" — a trial it never had. It now
   reads "No active membership" in all five languages. Test 94 covers it.
+- **The store build offers no in-app payment, on any view.** `STORE_BUILD` gates
+  four separate affordances — the paywall's Subscribe button and price fine
+  print, the welcome screen's Pay now, and the account screen's Pay now. Only
+  the first was asserted before; a leaked button on any of the other three would
+  have passed. All four are now checked, each confirmed by mutation.
