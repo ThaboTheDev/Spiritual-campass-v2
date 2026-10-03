@@ -49,8 +49,11 @@ api/
   payfast/cancel.js      POST → cancel via PayFast API
   _lib/                  env, http, supabase, entitlement, payfast signing/verification, ITN logic, centres data (not routes)
 supabase/schema.sql      Tables, security policies, admin view
-tests/unit/              29 tests: signatures vs PayFast PHP reference, ITN rules, entitlement, full API cycle
-tests/e2e/               Browser test of every membership screen (backend mocked)
+tests/unit/              API tests (signatures vs the PayFast PHP reference, ITN rules, entitlement,
+                         full API cycle) plus membership.test.js, which runs the real public/ files
+                         in jsdom against a mocked Supabase and /api/*
+tests/e2e/               The same membership flows in a real browser (Playwright, backend mocked)
+docs/                    translations-to-review.md, payfast-sandbox-checklist.md
 .env.example             Every environment variable, explained
 ```
 
@@ -132,10 +135,17 @@ update members set trial_ends_at = now() + interval '7 days' where email = 'some
 ## Tests
 ```bash
 npm install
-npm test                      # unit + API tests (PHP on the PATH enables the PayFast reference comparisons)
+npm test                      # API tests + the membership layer in jsdom; no browser needed
+                              # (PHP on the PATH also enables the PayFast reference comparisons)
 npx playwright install chromium
-npm run test:e2e              # membership screens in a real browser, backend mocked
+npm run test:e2e              # the same membership flows in a real browser, backend mocked
 ```
+
+`npm test` covers the gate end to end without a browser: sign-up and sign-in, the one-time welcome
+page, the paywall, `?payment=success` polling, the forced password change, 402/403 from `/api/centres`,
+the offline rule against `access_until`, the admin area, and the accessibility and service-worker
+rules. `tests/e2e/paywall.test.cjs` repeats it in Chromium; `npm test` also checks that every selector
+in that file still matches the shipped DOM, so the two cannot drift apart silently.
 
 ## Changing the price or trial
 Set `SUBSCRIPTION_AMOUNT` and `TRIAL_DAYS` in Vercel, and update `PRICE_LABEL` / `TRIAL_DAYS` in `public/config.js` (display only).

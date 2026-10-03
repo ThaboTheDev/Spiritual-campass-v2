@@ -26,11 +26,17 @@ const trial = (over = {}) => Object.assign({
   access_until: new Date(Date.now() + 7 * 864e5).toISOString(), is_admin: false,
   must_change_password: false, can_cancel: false, price: "100.00", currency: "ZAR", trial_days: 7
 }, over);
+/* Exactly what GET /api/centres returns: api/_lib/centres.js publicCentre() sends the long keys for
+   the admin area AND the short ones app.js renders from. A fixture with only one set lies. */
+const centre = (id, name, region, address, town, phone, lat, lng) => ({
+  id, name, region, address, town, phone, lat, lng, verified: true,
+  n: name, r: region, a: address, p: phone, la: lat, lo: lng
+});
 const CENTRES = {
   regions: ["Gauteng", "KwaZulu-Natal"],
   centres: [
-    { id: "c1", name: "Soweto Centre", region: "Gauteng", address: "1 Vilakazi St", town: "Soweto", phone: "+27 11 555 0100", lat: -26.33, lng: 27.9, verified: true },
-    { id: "c2", name: "Durban Centre", region: "KwaZulu-Natal", address: "2 Beach Rd", town: "Durban", phone: "", lat: -29.85, lng: 31.02, verified: true }
+    centre("c1", "Soweto Centre", "Gauteng", "1 Vilakazi St", "Soweto", "+27 11 555 0100", -26.33, 27.9),
+    centre("c2", "Durban Centre", "KwaZulu-Natal", "2 Beach Rd", "Durban", "", -29.85, 31.02)
   ]
 };
 
@@ -288,6 +294,9 @@ test("sign-in shows the welcome page once per account", async () => {
   assert.equal(b.visible("member"), false, "trial button opens the app");
   assert.equal(b.ev("MEMBER.hasAccess"), true, "access granted");
   assert.equal(b.ev("CENTRES.length"), 2, "centres came from /api/centres");
+  b.click("tab-centres"); await wait(3);
+  assert.equal(await b.ev(`document.querySelectorAll("#c-list .c-item").length`), 2, "and they render as rows the member can see");
+  assert.equal(await b.ev(`document.querySelectorAll("#c-list .c-group").length`), 2, "grouped by region");
   const seed = b.dump(); b.close();
 
   const b2 = await boot({ seed });
@@ -833,4 +842,58 @@ test("a failed admin list load offers a retry that works", async () => {
   await wait(6);
   assert.equal(b.el("m-user-list").querySelectorAll(".m-row-card").length, 3, "the retry loads the members");
   b.close();
+});
+
+/* The Playwright suite needs a browser, which is not always available. This test reads that file and
+   proves every selector in it still matches the shipped DOM, so a rename cannot silently break it. */
+test("every selector in the Playwright suite matches the real DOM", async () => {
+  const e2e = fs.readFileSync(path.join(HERE, "..", "e2e", "paywall.test.cjs"), "utf8");
+  const sels = new Set();
+  for (const m of e2e.matchAll(/(?:vis|txt)\((?:p|page),\s*"([^"]+)"/g)) sels.add("#" + m[1]);
+  for (const m of e2e.matchAll(/getElementById\("([^"]+)"\)/g)) sels.add("#" + m[1]);
+  for (const m of e2e.matchAll(/["'`](#[A-Za-z0-9_\-][^"'`]*)["'`]/g)) sels.add(m[1]);
+  for (const m of e2e.matchAll(/querySelectorAll\(\s*["'`]([^"'`]+)["'`]/g)) sels.add(m[1]);
+  assert.ok(sels.size > 25, "found the selectors to check: " + sels.size);
+
+  const hits = new Map();
+  const probe = async (b) => {
+    for (const s of sels) {
+      if (hits.get(s)) continue;
+      let n = 0;
+      try { n = await b.ev(`document.querySelectorAll(${JSON.stringify(s)}).length`); } catch (e) { n = 0; }
+      if (n) hits.set(s, n);
+    }
+  };
+
+  // 1. the gate on first open
+  let b = await boot(); await probe(b); b.close();
+  // 2. signed-in member, welcome then account
+  b = await boot({ seed: { "tshk-session": sess(), "tshk-welcome": JSON.stringify({ "member@example.org": true }) } });
+  await wait(8); b.click("acct"); await wait(3); await probe(b);
+  b.click("tab-centres"); await wait(2); await probe(b); b.close();
+  // 3. paywall
+  b = await boot({ me: trial({ access: false, state: "trial_ended", days_left: undefined, access_until: undefined }), seed: { "tshk-session": sess(), "tshk-welcome": JSON.stringify({ "member@example.org": true }) } });
+  await wait(8); await probe(b); b.close();
+  // 4. forced password change
+  b = await boot({ me: trial({ must_change_password: true }), seed: { "tshk-session": sess(), "tshk-welcome": JSON.stringify({ "member@example.org": true }) } });
+  await wait(8); await probe(b); b.close();
+  // 5. welcome page
+  b = await boot(); b.fill("m-in-email", "member@example.org"); b.fill("m-in-pw", "Trialpass1"); b.submit("m-signin"); await wait(8);
+  await probe(b); b.close();
+  // 6. offline centres note
+  b = await boot({ online: false, seed: { "tshk-session": sess(), "tshk-welcome": JSON.stringify({ "member@example.org": true }) } });
+  await wait(8); b.click("tab-centres"); await wait(2); await probe(b); b.close();
+  // 7. admin: members, the confirm dialog, the one-time password, the type-to-confirm delete, centres tab
+  b = await boot({ me: adminMe, seed: adminSeed, state: { adminUsers: ADMINS, adminCentres: CENTRES, deleteFailsFirst: true } });
+  await wait(8); b.click("acct"); await wait(2); b.click("m-admin-open"); await wait(6); await probe(b);
+  b.el("m-user-list").querySelectorAll(".m-acts button")[0].dispatchEvent(new b.win.MouseEvent("click", { bubbles: true }));
+  await wait(2); await probe(b); b.click("m-modal-ok"); await wait(4); await probe(b); b.click("m-modal-ok"); await wait(2);
+  b.el("m-user-list").querySelectorAll(".m-acts button")[1].dispatchEvent(new b.win.MouseEvent("click", { bubbles: true }));
+  await wait(2); await probe(b); b.click("m-modal-cancel"); await wait(2);
+  b.click("m-adm-tab-centres"); await wait(6); await probe(b);
+  b.el("m-c-list").querySelectorAll(".m-acts button")[0].dispatchEvent(new b.win.MouseEvent("click", { bubbles: true }));
+  await wait(2); await probe(b); b.close();
+
+  const missing = [...sels].filter((s) => !hits.get(s));
+  assert.deepEqual(missing, [], "selectors in tests/e2e/paywall.test.cjs that match nothing: " + JSON.stringify(missing));
 });
