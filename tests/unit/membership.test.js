@@ -510,6 +510,7 @@ test("admin: auto-generate password shows the password once and clears it", asyn
   assert.equal(b.txt("m-modal-pw"), "Abc3def5ghij", "the temporary password is shown");
   assert.equal(b.el("m-modal-body").textContent.includes("Give this to the member"), true, "with the instruction text");
   assert.equal(b.visible("m-modal-copy"), true, "with a Copy button");
+  assert.equal(b.el("m-modal-cancel").hidden, true, "and a single Close, not Close + Cancel");
   b.click("m-modal-ok"); await wait(2);
   assert.equal(b.visible("m-modal"), false, "dialog closed");
   assert.equal(b.el("m-modal-body").textContent, "", "the password is gone from the DOM");

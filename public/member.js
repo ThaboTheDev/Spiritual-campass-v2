@@ -232,7 +232,7 @@ const MEMBER = (function () {
       sub.textContent = (session && session.email) || "";
       el("m-account").hidden = false;
       el("m-state").textContent = stateLine();
-      el("m-acct-pay").hidden = storeBuild || !!(ent && ent.state === "active");
+      el("m-acct-pay").hidden = storeBuild || !!(ent && (ent.state === "active" || ent.state === "admin"));
       el("m-cancel").hidden = !(ent && ent.can_cancel);
       el("m-cancel").textContent = two("Cancel subscription", "pay_cancel");
       el("m-admin-open").hidden = !(ent && ent.is_admin);
@@ -551,6 +551,7 @@ const MEMBER = (function () {
     if (o.input) { el("m-modal-input-l").textContent = o.input; el("m-modal-input").setAttribute("aria-label", o.input); }
     el("m-modal-ok").textContent = o.okLabel || two("Confirm", "confirm");
     el("m-modal-cancel").textContent = o.cancelLabel || two("Cancel", "cancel");
+    el("m-modal-cancel").hidden = o.hideCancel === true;
     el("m-modal-ok").disabled = !!o.input;
     if (o.input) el("m-modal-input").addEventListener("input", () => { el("m-modal-ok").disabled = el("m-modal-input").value.trim().toLowerCase() !== String(o.match || "").toLowerCase(); });
     m.hidden = false;
@@ -691,6 +692,7 @@ const MEMBER = (function () {
             lines: [two("Give this to the member. They must change it when they sign in.", "admin_reset_note")],
             password: d.password,
             okLabel: two("Close", "close"),
+            hideCancel: true,
             onOk: () => { loadUsers(); }
           });
         } catch (e) { say(networkMsg()); }
