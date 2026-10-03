@@ -153,7 +153,7 @@ npm run test:e2e              # the same membership flows in a real browser, bac
 `.github/workflows/tests.yml` runs both on every push and pull request to `main`, on Ubuntu with
 Node 22, PHP 8.2 and Chromium — so the PayFast signature comparisons run rather than skip, and the
 browser suite really executes. The last run reported **94 unit/API tests passing (0 skipped)** and
-**70 browser assertions passing**. Node 22 is deliberate: jsdom 30 declares
+**77 browser assertions passing**. Node 22 is deliberate: jsdom 30 declares
 `engines: ^22.22.2 || ^24.15.0 || >=26`, and since npm does not enforce `engines`, Node 20 installs
 cleanly and then fails at import time.
 

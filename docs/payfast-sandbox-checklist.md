@@ -124,12 +124,12 @@ Ubuntu with Node 22, PHP 8.2 and a real Chromium:
   compare the Node signing code against PayFast's own PHP reference
   (`tests/unit/php-reference.php`) byte for byte all run and pass — the
   checkout, ITN and API signatures included.
-- **Browser: 70 assertions.** `tests/e2e/paywall.test.cjs` drives the whole
+- **Browser: 77 assertions.** `tests/e2e/paywall.test.cjs` drives the whole
   membership flow in Chromium against a mocked backend: sign-up with no
   confirmation e-mail, the one-time welcome page, the paywall and the signed
   PayFast form it posts, `?payment=success` polling, the forced password change,
   402/403 from `/api/centres`, the offline rule against `access_until`, the admin
-  area and the cancel flow.
+  area, the cancel flow, and the 320px layout with its 44px controls.
 
 ## What has not been verified automatically
 
@@ -145,13 +145,15 @@ automated tests in this repository could **not** prove:
   "Confirm email" enabled, sign-up returns no session and the app says the
   account still asks for confirmation. Turn it off; there is deliberately no
   client-side workaround.
-- **Real-device behaviour.** The browser suite runs in Chromium at 390×844 with
+- **Real-device behaviour.** The browser suite runs in Chromium with
   `isMobile: true`, so the layout engine and the sensor/geolocation spies are
-  real, and it proves the centres tab starts no compass sensors. It still cannot
-  cover the **320px** width, safe-area insets on a notched phone, visible focus
-  rings, the iOS motion-permission prompt, PWA install, or true airplane-mode
-  offline (the suite simulates offline with `navigator.onLine`, not a dead
-  radio). Check those on a phone.
+  real: it proves the centres tab starts no compass sensors, and a separate step
+  at **320×700** proves the gate and the open app do not scroll sideways, no
+  element extends past the viewport, every gate button really renders 44px tall
+  and every input has a label. Chromium still cannot cover safe-area insets on a
+  notched phone, visible focus rings, the iOS motion-permission prompt, PWA
+  install, or true airplane-mode offline (the suite simulates offline with
+  `navigator.onLine`, not a dead radio). Check those on a phone.
 - **The 378 Portuguese, Chichewa and iciBemba strings need a native speaker.**
   See `docs/translations-to-review.md`.
 - **Grace-period rendering is defensive.** The client shows a "payment is late"
