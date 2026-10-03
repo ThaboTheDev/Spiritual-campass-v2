@@ -69,5 +69,5 @@ jobs:
       - name: Surface browser failures
         if: steps.e2e.outcome == 'failure'
         run: |
-          grep -E "FAIL|failed|Error|✗|✘" /tmp/e2e.log | head -40 | tr -d '\r' | sed -e 's/%/%25/g' -e 's/^/::error::/'
+          grep -E "FAIL|state:|failed|Error|TimeoutError" /tmp/e2e.log | head -60 | tr -d '\r' | cut -c1-400 | sed -e 's/%/%25/g' -e 's/^/::error::/'
           exit 1
