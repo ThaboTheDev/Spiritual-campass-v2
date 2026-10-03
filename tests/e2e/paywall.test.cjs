@@ -438,6 +438,35 @@ const centres = { regions: REGIONS, centres: ROWS };
   await ok(!wide.docOverflow, "the centres list does not scroll sideways at 320px: " + JSON.stringify(wide));
   await p.context().close();
 
+  // 16. keyboard focus is visible. :focus-visible only matches real keyboard
+  //     navigation, so this walks the Tab order rather than calling .focus().
+  state.me = trial();
+  p = await newPage(null, { width: 390, height: 844 });
+  await p.goto(srv.url + "/"); await p.waitForTimeout(500);
+  const rings = [];
+  for (let i = 0; i < 8; i++) {
+    await p.keyboard.press("Tab");
+    rings.push(await p.evaluate(() => {
+      const e = document.activeElement;
+      if (!e || !e.matches(".btn, input, select, .tab")) return null;
+      const cs = getComputedStyle(e);
+      return {
+        id: e.id || e.tagName,
+        style: cs.outlineStyle,
+        width: cs.outlineWidth,
+        offset: cs.outlineOffset,
+        colour: cs.outlineColor,
+      };
+    }));
+  }
+  const focused = rings.filter(Boolean);
+  await ok(focused.length > 0, "Tab reaches the gate controls: " + JSON.stringify(rings));
+  await ok(
+    focused.every((f) => f.style !== "none" && parseFloat(f.width) >= 2),
+    "every keyboard stop shows a focus ring: " + JSON.stringify(focused)
+  );
+  await p.context().close();
+
   await ok(errs.length === 0, "no page errors " + JSON.stringify(errs));
   await ok(state.emailCall === null, "Supabase was never asked to send a confirmation or reset e-mail");
   await browser.close(); srv.close();
