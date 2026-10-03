@@ -467,6 +467,36 @@ const centres = { regions: REGIONS, centres: ROWS };
   );
   await p.context().close();
 
+  // 17. the real service worker. tests/unit/membership.test.js executes sw.js inside a
+  //     `new Function` stub, which proves the logic but not the worker; here Chromium
+  //     registers the actual file and we read what it really put in the cache.
+  state.me = trial();
+  p = await newPage();
+  await p.goto(srv.url + "/");
+  const swCtx = p.context();
+  const sw = swCtx.serviceWorkers()[0] ||
+    await swCtx.waitForEvent("serviceworker", { timeout: 15000 }).catch(() => null);
+  await ok(!!sw, "the service worker registers");
+  if (sw) {
+    await p.waitForTimeout(1200);
+    const cached = await sw.evaluate(async () => {
+      const out = {};
+      for (const k of await caches.keys()) out[k] = (await (await caches.open(k)).keys()).map((r) => r.url);
+      return out;
+    });
+    const all = Object.values(cached).flat();
+    const banned = all.filter((u) =>
+      u.indexOf("/api/") >= 0 || u.indexOf("supabase.co") >= 0 ||
+      u.indexOf("payfast.co.za") >= 0 || /\/(reset|confirmed|dashboard)\b/.test(u));
+    await ok(banned.length === 0, "the worker caches no API, auth, PayFast or one-use page: " + JSON.stringify(banned));
+    await ok(all.some((u) => /\/member\.js$/.test(u)) && all.some((u) => /\/app\.js$/.test(u)),
+      "but it does cache the app shell: " + JSON.stringify(all.slice(0, 8)));
+    await ok(Object.keys(cached).length > 0 && Object.keys(cached).every((k) => /^tshk-compass-sub-v\d+$/.test(k)),
+      "under the versioned cache name: " + JSON.stringify(Object.keys(cached)));
+  }
+  await p.context().close();
+  CUR = null;
+
   await ok(errs.length === 0, "no page errors " + JSON.stringify(errs));
   await ok(state.emailCall === null, "Supabase was never asked to send a confirmation or reset e-mail");
   await browser.close(); srv.close();
