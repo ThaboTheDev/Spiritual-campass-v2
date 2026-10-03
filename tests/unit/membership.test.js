@@ -51,6 +51,17 @@ function server(state) {
     try { body = init && init.body ? JSON.parse(init.body) : null; } catch (e) { body = init.body; }
     calls.push({ url: u, method, body });
     if (state.netDown && !/supabase\.co/.test(u)) throw new Error("network down");
+    /* A hung request: never settles by itself, only when the caller's abort timer fires.
+       This is what makes the 20 s timeout in member.js reachable from a test. */
+    if (state.hang && state.hang.test(u)) {
+      return new Promise((res, rej) => {
+        const sig = init && init.signal;
+        if (!sig) return;
+        sig.addEventListener("abort", () => {
+          const e = new Error("The operation was aborted"); e.name = "AbortError"; rej(e);
+        });
+      });
+    }
 
     if (/\/auth\/v1\/signup/.test(u)) {
       if (state.signupError) return resp(state.signupError.status, state.signupError.body);
@@ -1020,4 +1031,47 @@ test("every language carries the same keys, and the client never asks for one th
   }
   // and no leftover keys from the removed e-mail flow
   for (const k of [...sets.zu]) assert.ok(!/^(code_|otp_)/.test(k), k + " belongs to the removed e-mail flow");
+});
+
+test("a hung request is abandoned after the timeout and the buttons come back", async () => {
+  /* Spec: a 20 s ceiling on every call, so a hung request can never leave a button
+     disabled forever. timeoutMs shrinks the real 20 s to something a test can wait out. */
+  const b = await boot({
+    state: { hang: /auth\/v1\/token/ },
+    timing: { pollMs: 25, pollMax: 2, pollFirstMs: 25, recheckMs: 36e5, timeoutMs: 40 }
+  });
+  b.fill("m-in-email", "member@example.org"); b.fill("m-in-pw", "Trialpass1");
+  b.submit("m-signin");
+  await wait(1);
+  assert.equal(b.el("m-in-go").disabled, true, "the button is disabled while the call is in flight");
+  await new Promise((r) => setTimeout(r, 140));        // let the 40 ms abort timer fire
+  await wait(3);
+  assert.equal(b.el("m-in-go").disabled, false, "the timeout re-enables it, so nothing stays stuck");
+  assert.equal(b.txt("m-msg").includes("did not answer"), true, "and the member is told why: " + b.txt("m-msg"));
+  assert.equal(b.el("m-in-pw").value, "", "the password field is cleared");
+  assert.equal(b.visible("m-signin"), true, "still on the sign-in form, so it can be retried");
+  assert.deepEqual(b.errors, [], "no unhandled rejection");
+  b.close();
+});
+
+test("the 15-minute re-check really re-reads /api/me", async () => {
+  /* Spec: re-check /api/me on start, on tab return and every 15 minutes. The harness
+     normally sets recheckMs to an hour so the interval never fires; shrink it. */
+  const b = await boot({
+    seed: {
+      "tshk-session": JSON.stringify({ access_token: "t", refresh_token: "r", expires_at: Date.now() + 36e5, email: "member@example.org" }),
+      "tshk-welcome": JSON.stringify({ "member@example.org": true })
+    },
+    timing: { pollMs: 25, pollMax: 2, pollFirstMs: 25, recheckMs: 40 }
+  });
+  await wait(4);
+  const first = called(b.calls, /\/api\/me/).length;
+  assert.ok(first >= 1, "the start-up check happened");
+  await new Promise((r) => setTimeout(r, 160));        // several 40 ms intervals
+  await wait(3);
+  const later = called(b.calls, /\/api\/me/).length;
+  assert.ok(later > first, "the interval re-checked /api/me on its own: " + first + " -> " + later);
+  assert.equal(b.ev("MEMBER.hasAccess"), true, "and access is still granted");
+  assert.deepEqual(b.errors, [], "no page errors");
+  b.close();
 });

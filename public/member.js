@@ -23,9 +23,9 @@ const MEMBER = (function () {
      relative and a reverse proxy or a local mock can answer them. */
   const configured = () => typeof CFG.SUPABASE_URL === "string" && CFG.SUPABASE_URL.indexOf("YOUR-PROJECT") < 0;
   const SKEY = "tshk-session", EKEY = "tshk-ent", CKEY = "tshk-centres", WKEY = "tshk-welcome";
-  const TIMEOUT = 20000;                   // every network call gives up after 20 s
   /* window.TSHK_TIMING only exists in tests; the defaults below are what the app uses. */
   const TUNE = window.TSHK_TIMING || {};
+  const TIMEOUT = TUNE.timeoutMs || 20000;                   // every network call gives up after 20 s
   const POLL_MS = TUNE.pollMs || 3000, POLL_MAX = TUNE.pollMax || 20;   // PayFast return: 3 s x 20 = 60 s
   const POLL_FIRST = TUNE.pollFirstMs || 1500;
   const RECHECK_MS = TUNE.recheckMs || 15 * 60 * 1000;                 // re-check /api/me every 15 minutes
