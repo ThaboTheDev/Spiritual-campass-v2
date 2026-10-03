@@ -1,108 +1,317 @@
-// Browser test of the membership screens with the backend mocked.
+// Browser test of the membership screens with Supabase Auth and /api/* mocked.
+// The flow needs no e-mail: sign-up signs straight in, and a lost password is reset by an admin.
 // Run: npm install && npx playwright install chromium && npm run test:e2e
+// (tests/unit/membership.test.js covers the same flows without a browser, so `npm test` works anywhere.)
 const { chromium } = require("playwright");
 const http = require("http"), fs = require("fs"), path = require("path");
 const ROOT = path.join(__dirname, "..", "..", "public");
 const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".json": "application/json", ".webmanifest": "application/manifest+json", ".png": "image/png" };
 let FAILS = 0; const ok = (c, m) => { if (!c) FAILS++; console.log((c ? "PASS " : "FAIL ") + m); };
-const serve = () => new Promise((res) => { const s = http.createServer((q, r) => { let p = q.url.split("?")[0]; if (p === "/") p = "/index.html"; const f = path.join(ROOT, p);
-  if (!f.startsWith(ROOT) || !fs.existsSync(f) || fs.statSync(f).isDirectory()) { r.writeHead(404); return r.end(); } r.writeHead(200, { "Content-Type": TYPES[path.extname(f)] || "application/octet-stream" }); fs.createReadStream(f).pipe(r); });
-  s.listen(0, () => res({ url: `http://localhost:${s.address().port}`, close: () => s.close() })); });
+const serve = () => new Promise((res) => {
+  const s = http.createServer((q, r) => {
+    let p = q.url.split("?")[0]; if (p === "/") p = "/index.html";
+    const f = path.join(ROOT, p);
+    if (!f.startsWith(ROOT) || !fs.existsSync(f) || fs.statSync(f).isDirectory()) { r.writeHead(404); return r.end(); }
+    r.writeHead(200, { "Content-Type": TYPES[path.extname(f)] || "application/octet-stream" }); fs.createReadStream(f).pipe(r);
+  });
+  s.listen(0, () => res({ url: `http://localhost:${s.address().port}`, close: () => s.close() }));
+});
 const { REGIONS, CENTRES } = (() => { const src = fs.readFileSync(path.join(__dirname, "..", "..", "api", "_lib", "centres-data.js"), "utf8").replace(/export const /g, "const "); return new Function(src + ";return {REGIONS,CENTRES};")(); })();
+const centres = { regions: REGIONS, centres: CENTRES };
 
 (async () => {
   const srv = await serve(); const browser = await chromium.launch(); const errs = [];
-  const state = { me: null, meQueue: [], checkoutPosted: null, cancelled: false, meFail: false };
-  async function newPage(init) {
-    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true }); const page = await ctx.newPage();
+  const state = {
+    me: null, meQueue: [], centresStatus: null, meStatus: null, checkoutPosted: null, cancelled: 0,
+    passwords: { "member@example.org": "Trialpass1" }, emailCall: null, signupNoSession: false,
+    adminUsers: [], adminStatus: null, deleteFailsFirst: false, deleteCalls: [], resetCalls: 0, centresDb: CENTRES
+  };
+  const session = (email) => ({ access_token: "tok-" + email, refresh_token: "rt", expires_in: 3600, user: { email } });
+
+  async function newPage(init, opts) {
+    const o = opts || {};
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true });
+    const page = await ctx.newPage();
     page.on("pageerror", (e) => errs.push(e.message));
+    await page.addInitScript(() => {
+      window.__spy = { gps: 0, sensors: [] };
+      const geo = navigator.geolocation;
+      Object.defineProperty(navigator, "geolocation", {
+        value: {
+          getCurrentPosition() { window.__spy.gps++; }, watchPosition() { window.__spy.gps++; return 1; }, clearWatch() {}
+        }, configurable: true
+      });
+      void geo;
+      const add = window.addEventListener.bind(window);
+      window.addEventListener = (t, fn, x) => { if (/deviceorientation|devicemotion/.test(t)) window.__spy.sensors.push(t); return add(t, fn, x); };
+      if (window.__offline) Object.defineProperty(navigator, "onLine", { value: false, configurable: true });
+    });
     if (init) await page.addInitScript(init);
     await page.route(/cdnjs|googleapis|gstatic|openstreetmap/, (r) => r.abort());
-    await page.route(/supabase\.co\/auth\/v1\/otp/, (r) => r.fulfill({ json: {} }));
-    await page.route(/supabase\.co\/auth\/v1\/verify/, (r) => { const b = JSON.parse(r.request().postData()); return b.token === "123456" ? r.fulfill({ json: { access_token: "good-token", refresh_token: "rt", expires_in: 3600, user: { email: b.email } } }) : r.fulfill({ status: 403, json: { msg: "Token has expired or is invalid" } }); });
-    await page.route("**/api/me", (r) => { if (state.meFail) return r.abort(); const m = state.meQueue.length ? state.meQueue.shift() : state.me; return r.fulfill({ json: m }); });
-    await page.route("**/api/centres", (r) => r.fulfill({ json: { regions: REGIONS, centres: CENTRES } }));
-    await page.route("**/api/payfast/checkout", (r) => r.fulfill({ json: { action: srv.url + "/__payfast", fields: { merchant_id: "10000100", merchant_key: "k", amount: "100.00", item_name: "TSHK Compass monthly membership", subscription_type: "1", frequency: "3", recurring_amount: "100.00", signature: "abc" } } }));
+    await page.route(/supabase\.co\/auth\/v1\/signup/, (r) => {
+      const b = JSON.parse(r.request().postData());
+      if (/redirect_to/.test(r.request().url())) errs.push("signup asked for a confirmation redirect");
+      state.passwords[b.email] = b.password;
+      return state.signupNoSession ? r.fulfill({ json: { id: "new-user", email: b.email } }) : r.fulfill({ json: session(b.email) });
+    });
+    await page.route(/supabase\.co\/auth\/v1\/token\?grant_type=password/, (r) => {
+      const b = JSON.parse(r.request().postData());
+      if (state.passwords[b.email] === b.password) return r.fulfill({ json: session(b.email) });
+      return r.fulfill({ status: 400, json: { error: "invalid_grant", error_code: "invalid_credentials", msg: "Invalid login credentials" } });
+    });
+    await page.route(/supabase\.co\/auth\/v1\/token\?grant_type=refresh_token/, (r) => r.fulfill({ json: session("member@example.org") }));
+    await page.route(/supabase\.co\/auth\/v1\/(recover|otp|verify)/, (r) => { state.emailCall = r.request().url(); return r.fulfill({ json: {} }); });
+    await page.route("**/api/me", (r) => {
+      if (state.meStatus) return r.fulfill({ status: state.meStatus.status, json: state.meStatus.body });
+      const m = state.meQueue.length ? state.meQueue.shift() : state.me;
+      return r.fulfill({ json: m });
+    });
+    await page.route("**/api/centres", (r) => state.centresStatus ? r.fulfill({ status: state.centresStatus.status, json: state.centresStatus.body }) : r.fulfill({ json: centres }));
+    await page.route("**/api/payfast/checkout", (r) => r.fulfill({
+      json: {
+        action: srv.url + "/__payfast",
+        fields: { merchant_id: "10000100", merchant_key: "k", amount: "100.00", item_name: "TSHK Compass monthly membership", subscription_type: "1", frequency: "3", recurring_amount: "100.00", signature: "abc" }
+      }
+    }));
     await page.route("**/__payfast", (r) => { state.checkoutPosted = r.request().postData(); return r.fulfill({ contentType: "text/html", body: "<h1>PayFast sandbox</h1>" }); });
-    await page.route("**/api/payfast/cancel", (r) => { state.cancelled = true; return r.fulfill({ json: { ok: true } }); });
+    await page.route("**/api/payfast/cancel", (r) => { state.cancelled++; return r.fulfill({ json: { ok: true } }); });
+    await page.route("**/api/account/change-password", (r) => {
+      const b = JSON.parse(r.request().postData());
+      if (!state.mustChange && b.current_password === undefined) return r.fulfill({ status: 400, json: { error: "current_password_required" } });
+      if (state.me) state.me.must_change_password = false;
+      state.newPassword = b.new_password;
+      return r.fulfill({ json: { ok: true } });
+    });
+    await page.route("**/api/admin/users**", (r) => {
+      if (state.adminStatus) return r.fulfill({ status: state.adminStatus.status, json: state.adminStatus.body });
+      const q = new URL(r.request().url()).searchParams.get("q") || "";
+      return r.fulfill({ json: { users: state.adminUsers.filter((u) => !q || u.email.includes(q)) } });
+    });
+    await page.route("**/api/admin/reset-password", (r) => { state.resetCalls++; return r.fulfill({ json: { ok: true, email: "bob@example.org", password: "Abc3def5ghij" } }); });
+    await page.route("**/api/admin/delete-user", (r) => {
+      const b = JSON.parse(r.request().postData());
+      state.deleteCalls.push(b.force === true ? "force" : "plain");
+      if (b.force !== true && state.deleteFailsFirst) return r.fulfill({ status: 502, json: { error: "payfast_cancel_failed" } });
+      return r.fulfill({ json: { ok: true, email: "bob@example.org", subscription_cancelled: true } });
+    });
+    await page.route("**/api/admin/centres", (r) => {
+      if (r.request().method() === "GET") return r.fulfill({ json: centres });
+      if (r.request().method() === "POST") {
+        const b = JSON.parse(r.request().postData());
+        if (!b.name) return r.fulfill({ status: 400, json: { error: "name_required" } });
+        if (b.lat === null !== (b.lng === null)) return r.fulfill({ status: 400, json: { error: "coordinates_invalid" } });
+        state.postedCentre = b; return r.fulfill({ status: 201, json: { centre: Object.assign({ id: "c-new" }, b) } });
+      }
+      const b = JSON.parse(r.request().postData());
+      if (r.request().method() === "PATCH") { state.patchedCentre = b; return r.fulfill({ json: { centre: Object.assign({ id: b.id }, b) } }); }
+      state.deletedCentre = b; return r.fulfill({ json: { ok: true } });
+    });
+    if (o.offline) await page.addInitScript(() => { window.__offline = true; });
     return page;
   }
   const vis = (page, id) => page.evaluate((i) => { let e = document.getElementById(i); if (!e) return false; for (; e; e = e.parentElement) { if (e.hidden || getComputedStyle(e).display === "none") return false; } return true; }, id);
   const txt = (page, id) => page.evaluate((i) => document.getElementById(i).textContent, id);
-  const trial = { email: "member@example.org", status: "trialing", access: true, state: "trial", days_left: 7, access_until: new Date(Date.now() + 7 * 864e5).toISOString(), can_cancel: false, price: "100.00" };
-  const ended = { email: "member@example.org", status: "trialing", access: false, state: "trial_ended", can_cancel: false, price: "100.00" };
-  const active = { email: "member@example.org", status: "active", access: true, state: "active", access_until: new Date(Date.now() + 33 * 864e5).toISOString(), renews: true, can_cancel: true, price: "100.00" };
+  const signIn = async (page, email, pw) => { await page.fill("#m-in-email", email); await page.fill("#m-in-pw", pw); await page.click("#m-in-go"); await page.waitForTimeout(400); };
+  const trial = (over) => Object.assign({ email: "member@example.org", status: "trialing", access: true, state: "trial", days_left: 7, access_until: new Date(Date.now() + 7 * 864e5).toISOString(), is_admin: false, must_change_password: false, can_cancel: false, price: "100.00", currency: "ZAR", trial_days: 7 }, over || {});
+  const active = () => trial({ status: "active", state: "active", renews: true, can_cancel: true, access_until: new Date(Date.now() + 30 * 864e5).toISOString(), paid_through: new Date(Date.now() + 30 * 864e5).toISOString() });
+  const ended = () => trial({ access: false, state: "trial_ended", days_left: undefined, access_until: undefined });
+  const sess = JSON.stringify({ access_token: "t", refresh_token: "r", expires_at: Date.now() + 36e5, email: "member@example.org" });
+  const seen = JSON.stringify({ "member@example.org": true });
 
-  // 1. new visitor signs in and gets the trial
-  state.me = trial;
-  let p = await newPage(); await p.goto(srv.url + "/"); await p.waitForTimeout(400);
-  ok(await vis(p, "member") && await vis(p, "m-auth-email"), "new visitor sees the sign-in screen (app is covered)");
-  ok((await txt(p, "m-sub")).includes("7 days") && (await txt(p, "m-sub")).includes("R100"), "sign-in screen explains 7 days free then R100/month: " + await txt(p, "m-sub"));
-  await p.fill("#m-email", "not-an-email"); await p.click("#m-send"); await p.waitForTimeout(100);
-  ok((await txt(p, "m-msg")).includes("valid email"), "invalid email is caught");
-  await p.fill("#m-email", "Member@Example.org"); await p.click("#m-send"); await p.waitForTimeout(300);
-  ok(await vis(p, "m-auth-code") && (await txt(p, "m-sub")).includes("member@example.org"), "code screen shows the address");
-  await p.fill("#m-code", "999999"); await p.click("#m-verify"); await p.waitForTimeout(300);
-  ok((await txt(p, "m-msg")).includes("did not work"), "wrong code is refused");
-  await p.fill("#m-code", "123456"); await p.click("#m-verify"); await p.waitForTimeout(800);
-  ok(!(await vis(p, "member")), "correct code → trial access, overlay closes");
-  ok((await txt(p, "acct-t")).startsWith("Trial · 7d"), "account chip shows trial days: " + await txt(p, "acct-t"));
-  await p.evaluate(() => document.getElementById("tab-centres").click()); await p.waitForTimeout(300);
-  ok(await p.evaluate(() => document.querySelectorAll("#c-list .c-item").length) === 88, "centres list loaded from the members API (88)");
-  await p.evaluate(() => document.getElementById("acct").click()); await p.waitForTimeout(200);
-  ok(await vis(p, "m-account") && (await txt(p, "m-state")).includes("7 days left") && await vis(p, "m-subscribe"), "account screen: trial line + subscribe button");
-  await p.selectOption("#m-lang", "pt"); await p.waitForTimeout(200);
-  ok((await txt(p, "m-title")).includes("Conta") && (await txt(p, "m-subscribe")).includes("Assinar"), "account screen follows the language selector (pt)");
-  await p.click("#m-close"); await p.waitForTimeout(100); ok(!(await vis(p, "member")), "account screen closes");
+  // 1. first open: the gate is up and nothing starts
+  state.me = trial();
+  let p = await newPage();
+  await p.goto(srv.url + "/"); await p.waitForTimeout(500);
+  ok(await vis(p, "member") && await vis(p, "m-signin"), "first open shows the sign-in screen");
+  ok(!(await vis(p, "m-signup")) && (await txt(p, "m-sub")).includes("7 days"), "with tabs and the trial offer: " + await txt(p, "m-sub"));
+  await p.evaluate(() => { document.getElementById("btn-start").click(); document.getElementById("btn-gps").click(); });
+  await p.waitForTimeout(200);
+  const spy = await p.evaluate(() => window.__spy);
+  ok(spy.gps === 0 && spy.sensors.length === 0, "no sensors and no geolocation start before access " + JSON.stringify(spy));
+  await p.context().close();
+
+  // 2. sign-up: no confirmation e-mail, straight in, then the one-time welcome page
+  state.me = trial();
+  p = await newPage(); await p.goto(srv.url + "/"); await p.waitForTimeout(400);
+  await p.click("#m-tab-up"); await p.waitForTimeout(150);
+  await p.fill("#m-up-email", "New@Example.org"); await p.fill("#m-up-pw", "abc"); await p.waitForTimeout(150);
+  ok(await p.evaluate(() => document.getElementById("m-r1").classList.contains("bad")), "short password is flagged as you type");
+  await p.fill("#m-up-pw", "Mypassword1"); await p.fill("#m-up-pw2", "Mypassword1"); await p.click("#m-up-go"); await p.waitForTimeout(800);
+  ok(await vis(p, "m-welcome"), "sign-up signs straight in and shows the welcome page (no confirmation e-mail)");
+  ok((await txt(p, "m-feats-w")).includes("Ekuphumuleni") && (await txt(p, "m-w-price")).includes("R100"), "welcome lists the features and the price");
+  ok(state.emailCall === null, "Supabase was never asked to send an e-mail");
+  await p.click("#m-w-trial"); await p.waitForTimeout(600);
+  ok(!(await vis(p, "member")), "Start my free trial opens the app");
   const saved = await p.evaluate(() => localStorage.getItem("tshk-session"));
+  const welcomeKey = await p.evaluate(() => localStorage.getItem("tshk-welcome"));
+  ok(!!saved && !!welcomeKey, "the session and the welcome marker are stored");
   await p.context().close();
 
-  // 2. trial over → paywall → PayFast form posted
-  state.me = ended;
-  p = await newPage(`localStorage.setItem("tshk-session", ${JSON.stringify(saved)});`); await p.goto(srv.url + "/"); await p.waitForTimeout(600);
-  ok(await vis(p, "member") && await vis(p, "m-pay") && (await txt(p, "m-title")).includes("trial has ended"), "after the trial: paywall with subscribe button");
-  ok(!(await vis(p, "m-close")), "paywall cannot be closed without access");
-  await p.click("#m-subscribe"); await p.waitForTimeout(800);
+  // 3. wrong password
+  p = await newPage(); await p.goto(srv.url + "/"); await p.waitForTimeout(400);
+  await signIn(p, "member@example.org", "Wrongpass1");
+  ok(await vis(p, "member") && (await txt(p, "m-msg")).includes("Wrong e-mail or password"), "wrong password: " + await txt(p, "m-msg"));
+  ok(await p.evaluate(() => document.getElementById("m-in-pw").value === ""), "the password field is cleared");
+  ok(state.emailCall === null, "and no reset e-mail is sent");
+  await p.context().close();
+
+  // 4. sign-in, welcome once per account, then the centres load
+  p = await newPage(); await p.goto(srv.url + "/"); await p.waitForTimeout(400);
+  await signIn(p, "member@example.org", "Trialpass1");
+  ok(await vis(p, "m-welcome"), "a first sign-in sees the welcome page");
+  await p.click("#m-w-trial"); await p.waitForTimeout(700);
+  ok(!(await vis(p, "member")) && (await txt(p, "acct-t")).startsWith("Trial · 7d"), "trial access, chip shows the days: " + await txt(p, "acct-t"));
+  await p.evaluate(() => document.getElementById("tab-centres").click()); await p.waitForTimeout(400);
+  ok(await p.evaluate(() => document.querySelectorAll("#c-list .c-item").length) === CENTRES.length, "centres come from /api/centres");
+  const s2 = await p.evaluate(() => localStorage.getItem("tshk-session"));
+  await p.context().close();
+  p = await newPage(`localStorage.setItem("tshk-session", ${JSON.stringify(s2)});localStorage.setItem("tshk-welcome", ${JSON.stringify(welcomeKey)});`);
+  await p.goto(srv.url + "/"); await p.waitForTimeout(900);
+  ok(!(await vis(p, "m-welcome")) && !(await vis(p, "member")), "the welcome page is not shown twice for the same account");
+  await p.context().close();
+
+  // 5. trial over → paywall → the PayFast form is posted
+  state.me = ended();
+  p = await newPage(`localStorage.setItem("tshk-session", ${JSON.stringify(saved)});localStorage.setItem("tshk-welcome", ${JSON.stringify(seen)});`);
+  await p.goto(srv.url + "/"); await p.waitForTimeout(700);
+  ok(await vis(p, "m-paywall") && (await txt(p, "m-title")).includes("trial has ended"), "trial over: the paywall is up");
+  ok((await txt(p, "m-feats-p")).includes("offline") && (await txt(p, "m-price")) === "R100", "paywall lists features and the price");
+  ok(!(await vis(p, "m-close")), "the paywall cannot be dismissed");
+  await p.click("#m-subscribe"); await p.waitForTimeout(900);
   const posted = new URLSearchParams(state.checkoutPosted || "");
-  ok(posted.get("recurring_amount") === "100.00" && posted.get("frequency") === "3" && posted.get("signature") === "abc", "browser posts the signed form to PayFast");
+  ok(posted.get("recurring_amount") === "100.00" && posted.get("frequency") === "3" && posted.get("signature") === "abc", "Pay now posts the signed PayFast form");
   await p.context().close();
 
-  // 3. back from PayFast: confirming until the ITN lands
-  state.meQueue = [ended, ended]; state.me = active;
-  p = await newPage(`localStorage.setItem("tshk-session", ${JSON.stringify(saved)});`); await p.goto(srv.url + "/?payment=success"); await p.waitForTimeout(900);
-  ok((await txt(p, "m-title")).includes("Confirming"), "return from PayFast shows 'Confirming your payment…'");
-  await p.waitForTimeout(4000);
-  ok(!(await vis(p, "member")), "access granted once PayFast's notification is processed");
-  ok(await p.evaluate(() => location.search === ""), "payment flag removed from the address bar");
-  await p.evaluate(() => document.getElementById("acct").click()); await p.waitForTimeout(200);
-  ok((await txt(p, "m-state")).includes("active") && await vis(p, "m-cancel") && !(await vis(p, "m-subscribe")), "account: active, cancel available, no double subscribe");
-  state.me = { ...active, status: "cancelled", state: "cancelled", renews: false, can_cancel: false };
-  await p.click("#m-cancel"); await p.waitForTimeout(100);
-  ok((await txt(p, "m-cancel")).includes("Tap again") && !state.cancelled, "cancel needs a second tap");
-  await p.click("#m-cancel"); await p.waitForTimeout(500);
-  ok(state.cancelled && (await txt(p, "m-state")).includes("Access until"), "cancelled: access continues until the paid month ends");
+  // 6. back from PayFast: poll /api/me until it turns active
+  state.meQueue = [ended(), ended(), active()]; state.me = active();
+  p = await newPage(`localStorage.setItem("tshk-session", ${JSON.stringify(saved)});localStorage.setItem("tshk-welcome", ${JSON.stringify(seen)});`);
+  await p.goto(srv.url + "/?payment=success"); await p.waitForTimeout(1200);
+  ok((await txt(p, "m-title")).includes("Confirming"), "the return shows 'Confirming your payment…'");
+  await p.waitForFunction(() => document.getElementById("member").hidden, null, { timeout: 30000 }).catch(() => {});
+  ok(!(await vis(p, "member")), "access is granted once /api/me reports active");
+  ok(await p.evaluate(() => location.search === ""), "the payment flag is removed from the address bar");
   await p.context().close();
 
-  // 4. offline: cached access honoured; no cache → offline screen
-  state.meFail = true;
-  const cached = JSON.stringify({ ...active, checked: Date.now() });
-  p = await newPage(`localStorage.setItem("tshk-session", ${JSON.stringify(saved)});localStorage.setItem("tshk-ent", ${JSON.stringify(cached)});`); await p.goto(srv.url + "/"); await p.waitForTimeout(600);
-  ok(!(await vis(p, "member")), "offline member with a valid cached membership can still pray (compass works)");
-  await p.context().close();
-  p = await newPage(`localStorage.setItem("tshk-session", ${JSON.stringify(saved)});`); await p.goto(srv.url + "/"); await p.waitForTimeout(600);
-  ok(await vis(p, "m-retry") && (await txt(p, "m-title")).includes("internet"), "offline with no cached membership → asks to connect");
-  state.meFail = false; await p.click("#m-retry"); await p.waitForTimeout(500);
-  ok(!(await vis(p, "member")), "Try again recovers when back online");
+  // 7. forced password change blocks everything
+  state.me = trial({ must_change_password: true }); state.mustChange = true;
+  p = await newPage(`localStorage.setItem("tshk-session", ${JSON.stringify(saved)});localStorage.setItem("tshk-welcome", ${JSON.stringify(seen)});`);
+  await p.goto(srv.url + "/"); await p.waitForTimeout(800);
+  ok(await vis(p, "m-forcepw"), "must_change_password shows the blocking screen");
+  ok(!(await vis(p, "m-auth")) && !(await vis(p, "m-account")) && !(await vis(p, "m-paywall")) && !(await vis(p, "m-welcome")), "nothing else is reachable");
+  ok(!(await vis(p, "m-close")) && await vis(p, "m-signout"), "the only other action is Sign out");
+  await p.fill("#m-fp-pw", "Brandnew1"); await p.fill("#m-fp-pw2", "Brandnew1"); await p.click("#m-fp-go"); await p.waitForTimeout(1200);
+  ok(!(await vis(p, "m-forcepw")), "after the change the member continues");
+  ok(await p.evaluate(() => document.getElementById("tab-centres").click() || window.__spy.sensors.length === 0), "the app is usable afterwards");
+  state.me = trial(); state.mustChange = false;
   await p.context().close();
 
-  // 5. store build hides PayFast inside the app
-  state.me = ended;
-  p = await newPage(`localStorage.setItem("tshk-session", ${JSON.stringify(saved)}); Object.defineProperty(window,"TSHK_CONFIG",{set(v){this._c={...v,STORE_BUILD:true}},get(){return this._c}});`);
-  await p.goto(srv.url + "/"); await p.waitForTimeout(600);
-  ok(await vis(p, "member") && !(await vis(p, "m-pay")) && (await txt(p, "m-sub")).includes("member account"), "store build: no PayFast button in the app");
+  // 8. /api/centres 402 and 403
+  state.me = trial(); state.centresStatus = { status: 402, body: { error: "subscription_required" } };
+  p = await newPage(`localStorage.setItem("tshk-session", ${JSON.stringify(saved)});localStorage.setItem("tshk-welcome", ${JSON.stringify(seen)});`);
+  await p.goto(srv.url + "/"); await p.waitForTimeout(1200);
+  ok(await vis(p, "m-paywall"), "402 from /api/centres shows the paywall");
+  await p.context().close();
+  state.centresStatus = { status: 403, body: { error: "password_change_required" } };
+  p = await newPage(`localStorage.setItem("tshk-session", ${JSON.stringify(saved)});localStorage.setItem("tshk-welcome", ${JSON.stringify(seen)});`);
+  await p.goto(srv.url + "/"); await p.waitForTimeout(1200);
+  ok(await vis(p, "m-forcepw"), "403 password_change_required shows the forced-change screen");
+  state.centresStatus = null;
+  await p.context().close();
+
+  // 9. offline: inside and beyond the cached access_until
+  state.me = trial();
+  const cached = JSON.stringify(Object.assign(active(), { checked: Date.now() }));
+  let offlineInit = `window.__offline = true;localStorage.setItem("tshk-session", ${JSON.stringify(saved)});localStorage.setItem("tshk-welcome", ${JSON.stringify(seen)});localStorage.setItem("tshk-ent", ${JSON.stringify(cached)});localStorage.setItem("tshk-centres", ${JSON.stringify(JSON.stringify(centres))});`;
+  p = await newPage(offlineInit, { offline: true });
+  await p.goto(srv.url + "/"); await p.waitForTimeout(900);
+  ok(!(await vis(p, "member")), "offline inside access_until: the app still works");
+  ok((await txt(p, "c-offline")).includes("Offline copy"), "the centres list is marked as an offline copy");
+  await p.context().close();
+  const stale = JSON.stringify(Object.assign(active(), { checked: Date.now(), access_until: new Date(Date.now() - 1000).toISOString() }));
+  p = await newPage(`window.__offline = true;localStorage.setItem("tshk-session", ${JSON.stringify(saved)});localStorage.setItem("tshk-ent", ${JSON.stringify(stale)});`, { offline: true });
+  await p.goto(srv.url + "/"); await p.waitForTimeout(900);
+  ok(await vis(p, "m-retry") && (await txt(p, "m-title")).includes("internet"), "offline past access_until: asks to connect");
+  await p.context().close();
+
+  // 10. admin is hidden for members, available for admins
+  state.me = trial(); state.adminUsers = [];
+  p = await newPage(`localStorage.setItem("tshk-session", ${JSON.stringify(saved)});localStorage.setItem("tshk-welcome", ${JSON.stringify(seen)});`);
+  await p.goto(srv.url + "/"); await p.waitForTimeout(800);
+  await p.click("#acct"); await p.waitForTimeout(300);
+  ok(!(await vis(p, "m-admin-open")), "no Admin button for a member");
+  await p.context().close();
+
+  const adminMe = trial({ email: "admin@example.org", is_admin: true, state: "admin", status: "active" });
+  const adminSess = JSON.stringify({ access_token: "a", refresh_token: "r", expires_at: Date.now() + 36e5, email: "admin@example.org" });
+  const adminSeen = JSON.stringify({ "admin@example.org": true });
+  const users = [
+    { user_id: "u-admin", email: "admin@example.org", status: "active", created_at: "2026-01-01", trial_ends_at: null, paid_through: null, is_admin: true, must_change_password: false, state: "admin", has_subscription: false, is_you: true },
+    { user_id: "u-boss", email: "boss@example.org", status: "active", created_at: "2026-01-01", trial_ends_at: null, paid_through: null, is_admin: true, must_change_password: false, state: "admin", has_subscription: false, is_you: false },
+    { user_id: "u-bob", email: "bob@example.org", status: "trialing", created_at: "2026-02-01", trial_ends_at: new Date(Date.now() + 3 * 864e5).toISOString(), paid_through: null, is_admin: false, must_change_password: true, state: "trial", has_subscription: true, is_you: false }
+  ];
+  state.me = adminMe; state.adminUsers = users;
+  p = await newPage(`localStorage.setItem("tshk-session", ${JSON.stringify(adminSess)});localStorage.setItem("tshk-welcome", ${JSON.stringify(adminSeen)});`);
+  await p.goto(srv.url + "/"); await p.waitForTimeout(900);
+  await p.click("#acct"); await p.waitForTimeout(200); await p.click("#m-admin-open"); await p.waitForTimeout(600);
+  ok(await vis(p, "m-admin"), "the admin panel opens for an admin");
+  ok(await p.evaluate(() => document.querySelectorAll("#m-user-list .m-row-card").length) === 3, "members are listed");
+  ok(await p.evaluate(() => document.querySelectorAll("#m-user-list .m-acts").length) === 1, "actions are hidden for yourself and for other admins");
+  await p.fill("#m-user-q", "bob"); await p.waitForTimeout(500);
+  ok(await p.evaluate(() => document.querySelectorAll("#m-user-list .m-row-card").length) === 1, "the search filters by e-mail");
+
+  // 11. auto-generate password: confirm first, show the password once, then clear it
+  await p.click("#m-user-list .m-acts button:nth-child(1)"); await p.waitForTimeout(300);
+  ok(await vis(p, "m-modal") && state.resetCalls === 0, "a confirm dialog comes first, nothing is sent yet");
+  await p.click("#m-modal-ok"); await p.waitForTimeout(500);
+  ok((await txt(p, "m-modal-pw")) === "Abc3def5ghij", "the temporary password is shown once");
+  ok((await p.evaluate(() => document.getElementById("m-modal-body").textContent)).includes("Give this to the member"), "with the instruction text");
+  ok(await vis(p, "m-modal-copy"), "and a Copy button");
+  await p.click("#m-modal-ok"); await p.waitForTimeout(300);
+  ok(await p.evaluate(() => !document.body.innerHTML.includes("Abc3def5ghij")), "the password is gone from the DOM after closing");
+
+  // 12. delete: type-to-confirm, then Delete anyway after a 502
+  state.deleteFailsFirst = true;
+  await p.click("#m-user-list .m-acts button:nth-child(2)"); await p.waitForTimeout(300);
+  ok(await vis(p, "m-modal-input") && await p.evaluate(() => document.getElementById("m-modal-ok").disabled), "delete needs the e-mail typed");
+  ok((await p.evaluate(() => document.getElementById("m-modal-body").textContent)).includes("cancelled first"), "and warns about the subscription");
+  await p.fill("#m-modal-input", "bob@example.org"); await p.waitForTimeout(150);
+  await p.click("#m-modal-ok"); await p.waitForTimeout(600);
+  ok(JSON.stringify(state.deleteCalls) === '["plain"]', "the first attempt goes without force");
+  ok(await vis(p, "m-modal") && (await txt(p, "m-modal-ok")).includes("Delete anyway"), "a 502 offers an explicit Delete anyway");
+  await p.click("#m-modal-ok"); await p.waitForTimeout(600);
+  ok(JSON.stringify(state.deleteCalls) === '["plain","force"]', "the retry sends force:true");
+  await p.context().close();
+
+  // 13. centres admin: add, edit, delete with the server's validation
+  state.me = adminMe;
+  p = await newPage(`localStorage.setItem("tshk-session", ${JSON.stringify(adminSess)});localStorage.setItem("tshk-welcome", ${JSON.stringify(adminSeen)});`);
+  await p.goto(srv.url + "/"); await p.waitForTimeout(900);
+  await p.click("#acct"); await p.waitForTimeout(200); await p.click("#m-admin-open"); await p.waitForTimeout(400);
+  await p.click("#m-adm-tab-centres"); await p.waitForTimeout(600);
+  ok(await p.evaluate(() => document.querySelectorAll("#m-c-list .m-group").length) > 1, "centres are grouped by region");
+  await p.fill("#m-c-name", ""); await p.fill("#m-c-region", "Gauteng"); await p.click("#m-c-save"); await p.waitForTimeout(300);
+  ok((await txt(p, "m-msg")).includes("name is needed"), "name is required: " + await txt(p, "m-msg"));
+  await p.fill("#m-c-name", "Test Centre"); await p.fill("#m-c-lat", "-26.2"); await p.click("#m-c-save"); await p.waitForTimeout(300);
+  ok((await txt(p, "m-msg")).includes("both latitude and longitude"), "latitude alone is refused: " + await txt(p, "m-msg"));
+  await p.fill("#m-c-lng", "280"); await p.click("#m-c-save"); await p.waitForTimeout(300);
+  ok((await txt(p, "m-msg")).includes("±180"), "out-of-range longitude is refused");
+  await p.fill("#m-c-lng", "28.04"); await p.fill("#m-c-phone", "nope!"); await p.click("#m-c-save"); await p.waitForTimeout(300);
+  ok((await txt(p, "m-msg")).includes("phone"), "phone characters are checked");
+  ok(!state.postedCentre, "nothing was posted while the form was invalid");
+  await p.fill("#m-c-phone", "+27 11 555 0100"); await p.fill("#m-c-town", "Sandton"); await p.click("#m-c-save"); await p.waitForTimeout(600);
+  ok(state.postedCentre && state.postedCentre.name === "Test Centre" && state.postedCentre.lat === -26.2, "a valid centre is posted");
+  await p.click("#m-c-list .m-acts button:nth-child(1)"); await p.waitForTimeout(300);
+  ok(await p.evaluate(() => document.getElementById("m-c-name").value.length > 0) && await vis(p, "m-c-cancel"), "edit fills the form");
+  await p.fill("#m-c-name", "Renamed Centre"); await p.click("#m-c-save"); await p.waitForTimeout(600);
+  ok(state.patchedCentre && state.patchedCentre.name === "Renamed Centre", "edit sends a PATCH");
+  await p.click("#m-c-list .m-acts button:nth-child(2)"); await p.waitForTimeout(300);
+  ok(await vis(p, "m-modal"), "delete asks first");
+  await p.click("#m-modal-ok"); await p.waitForTimeout(500);
+  ok(!!state.deletedCentre, "and then deletes");
   await p.context().close();
 
   ok(errs.length === 0, "no page errors " + JSON.stringify(errs));
+  ok(state.emailCall === null, "Supabase was never asked to send a confirmation or reset e-mail");
   await browser.close(); srv.close();
   if (FAILS) { console.log(FAILS + " check(s) failed"); process.exit(1); } else console.log("All checks passed");
 })();

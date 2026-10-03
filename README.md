@@ -18,7 +18,7 @@ compass works). This README covers the membership system.
 ```
 Phone (public/)                          Vercel functions (api/)                   Services
 ───────────────                          ───────────────────────                   ────────
-member.js ── email code ─────────────────────────────────────────────────────────► Supabase Auth
+member.js ── email + password ───────────────────────────────────────────────────► Supabase Auth
 member.js ── GET /api/me ──────────────► me.js: create member + trial, return access ──► Supabase DB
 app.js    ── GET /api/centres ─────────► centres.js: only if access (402 otherwise)
 member.js ── POST /api/payfast/checkout► checkout.js: signed PayFast form
@@ -152,8 +152,9 @@ never locks out existing subscribers; only new sign-ups pay the new price.
 
 ## Password sign-in, admin area and centres in the database
 
-Members sign in with **e-mail + password** (Supabase Auth). The sign-in, sign-up, confirm-e-mail and forgot-password calls go straight to
-Supabase from the app; everything else goes through this API.
+Members sign in with **e-mail + password** (Supabase Auth). Only two calls go straight to Supabase from the app — `signup` and
+`token?grant_type=password` (plus the refresh); there is no confirm-e-mail call and no forgot-password call, because this app sends no
+e-mail. Everything else goes through this API.
 
 **Set up (once)**
 1. Supabase → SQL editor: run `supabase/schema.sql`, then `supabase/seed_centres.sql` (88 centres).
