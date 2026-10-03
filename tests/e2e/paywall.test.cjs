@@ -201,7 +201,10 @@ const centres = { regions: REGIONS, centres: CENTRES };
   ok(!(await vis(p, "m-close")) && await vis(p, "m-signout"), "the only other action is Sign out");
   await p.fill("#m-fp-pw", "Brandnew1"); await p.fill("#m-fp-pw2", "Brandnew1"); await p.click("#m-fp-go"); await p.waitForTimeout(1200);
   ok(!(await vis(p, "m-forcepw")), "after the change the member continues");
-  ok(await p.evaluate(() => document.getElementById("tab-centres").click() || window.__spy.sensors.length === 0), "the app is usable afterwards");
+  ok(!(await vis(p, "member")), "and the app is open");
+  await p.evaluate(() => document.getElementById("tab-centres").click()); await p.waitForTimeout(500);
+  ok(await p.evaluate(() => document.querySelectorAll("#c-list .c-item").length) === CENTRES.length, "the centres list is usable afterwards");
+  ok((await p.evaluate(() => window.__spy.sensors)).length === 0, "the centres tab starts no compass sensors");
   state.me = trial(); state.mustChange = false;
   await p.context().close();
 
