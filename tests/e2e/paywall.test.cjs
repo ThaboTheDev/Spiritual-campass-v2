@@ -168,6 +168,20 @@ const centres = { regions: REGIONS, centres: ROWS };
   }
   const vis = (page, id) => page.evaluate((i) => { let e = document.getElementById(i); if (!e) return false; for (; e; e = e.parentElement) { if (e.hidden || getComputedStyle(e).display === "none") return false; } return true; }, id);
   const txt = (page, id) => page.evaluate((i) => document.getElementById(i).textContent, id);
+  /* Poll instead of sleeping. A fixed wait long enough on a fast laptop is a flake on a
+     loaded CI runner - the member search debounces for 300 ms and then makes a request,
+     and the sum of those is not a constant. Resolves as soon as the predicate holds, so
+     it is faster than the sleep it replaces when the app is quick and patient when it is
+     not. Returns false on timeout so the caller's own assertion reports the real state. */
+  const waitFor = async (page, fn, arg, ms) => {
+    const limit = Date.now() + (ms || 5000);
+    for (;;) {
+      if (await page.evaluate(fn, arg)) return true;
+      if (Date.now() > limit) return false;
+      await page.waitForTimeout(50);
+    }
+  };
+  const countRows = (sel) => document.querySelectorAll(sel).length;
   const signIn = async (page, email, pw) => { await page.fill("#m-in-email", email); await page.fill("#m-in-pw", pw); await page.click("#m-in-go"); await page.waitForTimeout(400); };
   const trial = (over) => Object.assign({ email: "member@example.org", status: "trialing", access: true, state: "trial", days_left: 7, access_until: new Date(Date.now() + 7 * 864e5).toISOString(), is_admin: false, must_change_password: false, can_cancel: false, price: "100.00", currency: "ZAR", trial_days: 7 }, over || {});
   const active = () => trial({ status: "active", state: "active", renews: true, can_cancel: true, access_until: new Date(Date.now() + 30 * 864e5).toISOString(), paid_through: new Date(Date.now() + 30 * 864e5).toISOString() });
@@ -323,10 +337,14 @@ const centres = { regions: REGIONS, centres: ROWS };
   await p.goto(srv.url + "/"); await p.waitForTimeout(900);
   await p.click("#acct"); await p.waitForTimeout(200); await p.click("#m-admin-open"); await p.waitForTimeout(600);
   await ok(await vis(p, "m-admin"), "the admin panel opens for an admin");
-  await ok(await p.evaluate(() => document.querySelectorAll("#m-user-list .m-row-card").length) === 3, "members are listed");
-  await ok(await p.evaluate(() => document.querySelectorAll("#m-user-list .m-acts").length) === 1, "actions are hidden for yourself and for other admins");
-  await p.fill("#m-user-q", "bob"); await p.waitForTimeout(500);
-  await ok(await p.evaluate(() => document.querySelectorAll("#m-user-list .m-row-card").length) === 1, "the search filters by e-mail");
+  await waitFor(p, countRows, "#m-user-list .m-row-card");
+  await ok(await p.evaluate(countRows, "#m-user-list .m-row-card") === 3, "members are listed");
+  await ok(await p.evaluate(countRows, "#m-user-list .m-acts") === 1, "actions are hidden for yourself and for other admins");
+  await p.fill("#m-user-q", "bob");
+  /* The search debounces for 300 ms and then fetches, so wait for the row count to
+     actually settle on 1 rather than sleeping a fixed 500 ms and hoping. */
+  await waitFor(p, (sel) => document.querySelectorAll(sel).length === 1, "#m-user-list .m-row-card");
+  await ok(await p.evaluate(countRows, "#m-user-list .m-row-card") === 1, "the search filters by e-mail");
 
   // 11. auto-generate password: confirm first, show the password once, then clear it
   await p.click("#m-user-list .m-acts button:nth-child(1)"); await p.waitForTimeout(300);
