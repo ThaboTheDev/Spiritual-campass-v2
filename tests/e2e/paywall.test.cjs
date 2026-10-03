@@ -6,7 +6,40 @@ const { chromium } = require("playwright");
 const http = require("http"), fs = require("fs"), path = require("path");
 const ROOT = path.join(__dirname, "..", "..", "public");
 const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".json": "application/json", ".webmanifest": "application/manifest+json", ".png": "image/png" };
-let FAILS = 0; const ok = (c, m) => { if (!c) FAILS++; console.log((c ? "PASS " : "FAIL ") + m); };
+let FAILS = 0;
+let CUR = null;                    // the page under test, so a failure can describe itself
+
+/* A headless run nobody can watch has to explain its own failures. Dump the state
+   the assertion depended on instead of leaving a bare FAIL in the log. */
+const diag = async () => {
+  if (!CUR) return "(no page)";
+  return await CUR.evaluate(() => {
+    const shown = (id) => {
+      let e = document.getElementById(id); if (!e) return false;
+      while (e && e !== document.body) { if (e.hidden) return false; e = e.parentElement; }
+      return true;
+    };
+    const views = ["m-auth", "m-signin", "m-signup", "m-welcome", "m-paywall", "m-account", "m-forcepw", "m-admin"].filter(shown);
+    const t = (id) => ((document.getElementById(id) || {}).textContent || "").trim().slice(0, 70);
+    return JSON.stringify({
+      href: location.href,
+      gateHidden: (document.getElementById("member") || {}).hidden,
+      views,
+      hasAccess: typeof MEMBER !== "undefined" ? MEMBER.hasAccess : "n/a",
+      title: t("m-title"), msg: t("m-msg"), chip: t("acct-t"),
+      centres: document.querySelectorAll("#c-list .c-item").length,
+      offlineNote: !(document.getElementById("c-offline") || {}).hidden,
+      storage: Object.keys(localStorage),
+    });
+  });
+};
+
+const ok = async (c, m) => {
+  if (c) { console.log("PASS " + m); return; }
+  FAILS++;
+  console.log("FAIL " + m);
+  try { console.log("     state: " + await diag()); } catch (e) { console.log("     state: (unavailable - " + e.message + ")"); }
+};
 const serve = () => new Promise((res) => {
   const s = http.createServer((q, r) => {
     let p = q.url.split("?")[0]; if (p === "/") p = "/index.html";
@@ -39,6 +72,7 @@ const centres = { regions: REGIONS, centres: CENTRES };
     const o = opts || {};
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true });
     const page = await ctx.newPage();
+    CUR = page;
     page.on("pageerror", (e) => errs.push(e.message));
     await page.addInitScript(() => {
       window.__spy = { gps: 0, sensors: [] };
@@ -129,12 +163,12 @@ const centres = { regions: REGIONS, centres: CENTRES };
   state.me = trial();
   let p = await newPage();
   await p.goto(srv.url + "/"); await p.waitForTimeout(500);
-  ok(await vis(p, "member") && await vis(p, "m-signin"), "first open shows the sign-in screen");
-  ok(!(await vis(p, "m-signup")) && (await txt(p, "m-sub")).includes("7 days"), "with tabs and the trial offer: " + await txt(p, "m-sub"));
+  await ok(await vis(p, "member") && await vis(p, "m-signin"), "first open shows the sign-in screen");
+  await ok(!(await vis(p, "m-signup")) && (await txt(p, "m-sub")).includes("7 days"), "with tabs and the trial offer: " + await txt(p, "m-sub"));
   await p.evaluate(() => { document.getElementById("btn-start").click(); document.getElementById("btn-gps").click(); });
   await p.waitForTimeout(200);
   const spy = await p.evaluate(() => window.__spy);
-  ok(spy.gps === 0 && spy.sensors.length === 0, "no sensors and no geolocation start before access " + JSON.stringify(spy));
+  await ok(spy.gps === 0 && spy.sensors.length === 0, "no sensors and no geolocation start before access " + JSON.stringify(spy));
   await p.context().close();
 
   // 2. sign-up: no confirmation e-mail, straight in, then the one-time welcome page
@@ -142,78 +176,78 @@ const centres = { regions: REGIONS, centres: CENTRES };
   p = await newPage(); await p.goto(srv.url + "/"); await p.waitForTimeout(400);
   await p.click("#m-tab-up"); await p.waitForTimeout(150);
   await p.fill("#m-up-email", "New@Example.org"); await p.fill("#m-up-pw", "abc"); await p.waitForTimeout(150);
-  ok(await p.evaluate(() => document.getElementById("m-r1").classList.contains("bad")), "short password is flagged as you type");
+  await ok(await p.evaluate(() => document.getElementById("m-r1").classList.contains("bad")), "short password is flagged as you type");
   await p.fill("#m-up-pw", "Mypassword1"); await p.fill("#m-up-pw2", "Mypassword1"); await p.click("#m-up-go"); await p.waitForTimeout(800);
-  ok(await vis(p, "m-welcome"), "sign-up signs straight in and shows the welcome page (no confirmation e-mail)");
-  ok((await txt(p, "m-feats-w")).includes("Ekuphumuleni") && (await txt(p, "m-w-price")).includes("R100"), "welcome lists the features and the price");
-  ok(state.emailCall === null, "Supabase was never asked to send an e-mail");
+  await ok(await vis(p, "m-welcome"), "sign-up signs straight in and shows the welcome page (no confirmation e-mail)");
+  await ok((await txt(p, "m-feats-w")).includes("Ekuphumuleni") && (await txt(p, "m-w-price")).includes("R100"), "welcome lists the features and the price");
+  await ok(state.emailCall === null, "Supabase was never asked to send an e-mail");
   await p.click("#m-w-trial"); await p.waitForTimeout(600);
-  ok(!(await vis(p, "member")), "Start my free trial opens the app");
+  await ok(!(await vis(p, "member")), "Start my free trial opens the app");
   const saved = await p.evaluate(() => localStorage.getItem("tshk-session"));
   const welcomeKey = await p.evaluate(() => localStorage.getItem("tshk-welcome"));
-  ok(!!saved && !!welcomeKey, "the session and the welcome marker are stored");
+  await ok(!!saved && !!welcomeKey, "the session and the welcome marker are stored");
   await p.context().close();
 
   // 3. wrong password
   p = await newPage(); await p.goto(srv.url + "/"); await p.waitForTimeout(400);
   await signIn(p, "member@example.org", "Wrongpass1");
-  ok(await vis(p, "member") && (await txt(p, "m-msg")).includes("Wrong e-mail or password"), "wrong password: " + await txt(p, "m-msg"));
-  ok(await p.evaluate(() => document.getElementById("m-in-pw").value === ""), "the password field is cleared");
-  ok(state.emailCall === null, "and no reset e-mail is sent");
+  await ok(await vis(p, "member") && (await txt(p, "m-msg")).includes("Wrong e-mail or password"), "wrong password: " + await txt(p, "m-msg"));
+  await ok(await p.evaluate(() => document.getElementById("m-in-pw").value === ""), "the password field is cleared");
+  await ok(state.emailCall === null, "and no reset e-mail is sent");
   await p.context().close();
 
   // 4. sign-in, welcome once per account, then the centres load
   p = await newPage(); await p.goto(srv.url + "/"); await p.waitForTimeout(400);
   await signIn(p, "member@example.org", "Trialpass1");
-  ok(await vis(p, "m-welcome"), "a first sign-in sees the welcome page");
+  await ok(await vis(p, "m-welcome"), "a first sign-in sees the welcome page");
   await p.click("#m-w-trial"); await p.waitForTimeout(700);
-  ok(!(await vis(p, "member")) && (await txt(p, "acct-t")).startsWith("Trial · 7d"), "trial access, chip shows the days: " + await txt(p, "acct-t"));
+  await ok(!(await vis(p, "member")) && (await txt(p, "acct-t")).startsWith("Trial · 7d"), "trial access, chip shows the days: " + await txt(p, "acct-t"));
   await p.evaluate(() => document.getElementById("tab-centres").click()); await p.waitForTimeout(400);
-  ok(await p.evaluate(() => document.querySelectorAll("#c-list .c-item").length) === CENTRES.length, "centres come from /api/centres");
+  await ok(await p.evaluate(() => document.querySelectorAll("#c-list .c-item").length) === CENTRES.length, "centres come from /api/centres");
   const s2 = await p.evaluate(() => localStorage.getItem("tshk-session"));
   await p.context().close();
   p = await newPage(`localStorage.setItem("tshk-session", ${JSON.stringify(s2)});localStorage.setItem("tshk-welcome", ${JSON.stringify(welcomeKey)});`);
   await p.goto(srv.url + "/"); await p.waitForTimeout(900);
-  ok(!(await vis(p, "m-welcome")) && !(await vis(p, "member")), "the welcome page is not shown twice for the same account");
+  await ok(!(await vis(p, "m-welcome")) && !(await vis(p, "member")), "the welcome page is not shown twice for the same account");
   await p.context().close();
 
   // 5. trial over → paywall → the PayFast form is posted
   state.me = ended();
   p = await newPage(`localStorage.setItem("tshk-session", ${JSON.stringify(saved)});localStorage.setItem("tshk-welcome", ${JSON.stringify(seen)});`);
   await p.goto(srv.url + "/"); await p.waitForTimeout(700);
-  ok(await vis(p, "m-paywall") && (await txt(p, "m-title")).includes("trial has ended"), "trial over: the paywall is up");
-  ok((await txt(p, "m-feats-p")).includes("offline") && (await txt(p, "m-price")) === "R100", "paywall lists features and the price");
-  ok(!(await vis(p, "m-close")), "the paywall cannot be dismissed");
+  await ok(await vis(p, "m-paywall") && (await txt(p, "m-title")).includes("trial has ended"), "trial over: the paywall is up");
+  await ok((await txt(p, "m-feats-p")).includes("offline") && (await txt(p, "m-price")) === "R100", "paywall lists features and the price");
+  await ok(!(await vis(p, "m-close")), "the paywall cannot be dismissed");
   await p.click("#m-subscribe"); await p.waitForTimeout(900);
   const posted = new URLSearchParams(state.checkoutPosted || "");
-  ok(posted.get("recurring_amount") === "100.00" && posted.get("frequency") === "3" && posted.get("signature") === "abc", "Pay now posts the signed PayFast form");
+  await ok(posted.get("recurring_amount") === "100.00" && posted.get("frequency") === "3" && posted.get("signature") === "abc", "Pay now posts the signed PayFast form");
   await p.context().close();
 
   // 6. back from PayFast: poll /api/me until it turns active
   state.meQueue = [ended(), ended(), active()]; state.me = active();
   p = await newPage(`localStorage.setItem("tshk-session", ${JSON.stringify(saved)});localStorage.setItem("tshk-welcome", ${JSON.stringify(seen)});`);
   await p.goto(srv.url + "/?payment=success"); await p.waitForTimeout(1200);
-  ok((await txt(p, "m-title")).includes("Confirming"), "the return shows 'Confirming your payment…'");
+  await ok((await txt(p, "m-title")).includes("Confirming"), "the return shows 'Confirming your payment…'");
   await p.waitForFunction(() => document.getElementById("member").hidden, null, { timeout: 30000 }).catch(() => {});
-  ok(!(await vis(p, "member")), "access is granted once /api/me reports active");
-  ok(await p.evaluate(() => location.search === ""), "the payment flag is removed from the address bar");
+  await ok(!(await vis(p, "member")), "access is granted once /api/me reports active");
+  await ok(await p.evaluate(() => location.search === ""), "the payment flag is removed from the address bar");
   await p.context().close();
 
   // 7. forced password change blocks everything
   state.me = trial({ must_change_password: true }); state.mustChange = true;
   p = await newPage(`localStorage.setItem("tshk-session", ${JSON.stringify(saved)});localStorage.setItem("tshk-welcome", ${JSON.stringify(seen)});`);
   await p.goto(srv.url + "/"); await p.waitForTimeout(800);
-  ok(await vis(p, "m-forcepw"), "must_change_password shows the blocking screen");
-  ok(!(await vis(p, "m-auth")) && !(await vis(p, "m-account")) && !(await vis(p, "m-paywall")) && !(await vis(p, "m-welcome")), "nothing else is reachable");
-  ok(!(await vis(p, "m-close")) && await vis(p, "m-signout"), "the only other action is Sign out");
-  ok(!(await vis(p, "m-pw-cur")), "only a new password is asked for, not the current one");
+  await ok(await vis(p, "m-forcepw"), "must_change_password shows the blocking screen");
+  await ok(!(await vis(p, "m-auth")) && !(await vis(p, "m-account")) && !(await vis(p, "m-paywall")) && !(await vis(p, "m-welcome")), "nothing else is reachable");
+  await ok(!(await vis(p, "m-close")) && await vis(p, "m-signout"), "the only other action is Sign out");
+  await ok(!(await vis(p, "m-pw-cur")), "only a new password is asked for, not the current one");
   await p.fill("#m-fp-pw", "Brandnew1"); await p.fill("#m-fp-pw2", "Brandnew1"); await p.click("#m-fp-go"); await p.waitForTimeout(1200);
-  ok(state.newPassword === "Brandnew1", "the password that was typed is the one that was sent");
-  ok(!(await vis(p, "m-forcepw")), "after the change the member continues");
-  ok(!(await vis(p, "member")), "and the app is open");
+  await ok(state.newPassword === "Brandnew1", "the password that was typed is the one that was sent");
+  await ok(!(await vis(p, "m-forcepw")), "after the change the member continues");
+  await ok(!(await vis(p, "member")), "and the app is open");
   await p.evaluate(() => document.getElementById("tab-centres").click()); await p.waitForTimeout(500);
-  ok(await p.evaluate(() => document.querySelectorAll("#c-list .c-item").length) === CENTRES.length, "the centres list is usable afterwards");
-  ok((await p.evaluate(() => window.__spy.sensors)).length === 0, "the centres tab starts no compass sensors");
+  await ok(await p.evaluate(() => document.querySelectorAll("#c-list .c-item").length) === CENTRES.length, "the centres list is usable afterwards");
+  await ok((await p.evaluate(() => window.__spy.sensors)).length === 0, "the centres tab starts no compass sensors");
   state.me = trial(); state.mustChange = false;
   await p.context().close();
 
@@ -221,12 +255,12 @@ const centres = { regions: REGIONS, centres: CENTRES };
   state.me = trial(); state.centresStatus = { status: 402, body: { error: "subscription_required" } };
   p = await newPage(`localStorage.setItem("tshk-session", ${JSON.stringify(saved)});localStorage.setItem("tshk-welcome", ${JSON.stringify(seen)});`);
   await p.goto(srv.url + "/"); await p.waitForTimeout(1200);
-  ok(await vis(p, "m-paywall"), "402 from /api/centres shows the paywall");
+  await ok(await vis(p, "m-paywall"), "402 from /api/centres shows the paywall");
   await p.context().close();
   state.centresStatus = { status: 403, body: { error: "password_change_required" } };
   p = await newPage(`localStorage.setItem("tshk-session", ${JSON.stringify(saved)});localStorage.setItem("tshk-welcome", ${JSON.stringify(seen)});`);
   await p.goto(srv.url + "/"); await p.waitForTimeout(1200);
-  ok(await vis(p, "m-forcepw"), "403 password_change_required shows the forced-change screen");
+  await ok(await vis(p, "m-forcepw"), "403 password_change_required shows the forced-change screen");
   state.centresStatus = null;
   await p.context().close();
 
@@ -236,13 +270,13 @@ const centres = { regions: REGIONS, centres: CENTRES };
   let offlineInit = `window.__offline = true;localStorage.setItem("tshk-session", ${JSON.stringify(saved)});localStorage.setItem("tshk-welcome", ${JSON.stringify(seen)});localStorage.setItem("tshk-ent", ${JSON.stringify(cached)});localStorage.setItem("tshk-centres", ${JSON.stringify(JSON.stringify(centres))});`;
   p = await newPage(offlineInit, { offline: true });
   await p.goto(srv.url + "/"); await p.waitForTimeout(900);
-  ok(!(await vis(p, "member")), "offline inside access_until: the app still works");
-  ok((await txt(p, "c-offline")).includes("Offline copy"), "the centres list is marked as an offline copy");
+  await ok(!(await vis(p, "member")), "offline inside access_until: the app still works");
+  await ok((await txt(p, "c-offline")).includes("Offline copy"), "the centres list is marked as an offline copy");
   await p.context().close();
   const stale = JSON.stringify(Object.assign(active(), { checked: Date.now(), access_until: new Date(Date.now() - 1000).toISOString() }));
   p = await newPage(`window.__offline = true;localStorage.setItem("tshk-session", ${JSON.stringify(saved)});localStorage.setItem("tshk-ent", ${JSON.stringify(stale)});`, { offline: true });
   await p.goto(srv.url + "/"); await p.waitForTimeout(900);
-  ok(await vis(p, "m-retry") && (await txt(p, "m-title")).includes("internet"), "offline past access_until: asks to connect");
+  await ok(await vis(p, "m-retry") && (await txt(p, "m-title")).includes("internet"), "offline past access_until: asks to connect");
   await p.context().close();
 
   // 10. admin is hidden for members, available for admins
@@ -250,7 +284,7 @@ const centres = { regions: REGIONS, centres: CENTRES };
   p = await newPage(`localStorage.setItem("tshk-session", ${JSON.stringify(saved)});localStorage.setItem("tshk-welcome", ${JSON.stringify(seen)});`);
   await p.goto(srv.url + "/"); await p.waitForTimeout(800);
   await p.click("#acct"); await p.waitForTimeout(300);
-  ok(!(await vis(p, "m-admin-open")), "no Admin button for a member");
+  await ok(!(await vis(p, "m-admin-open")), "no Admin button for a member");
   await p.context().close();
 
   const adminMe = trial({ email: "admin@example.org", is_admin: true, state: "admin", status: "active" });
@@ -265,33 +299,33 @@ const centres = { regions: REGIONS, centres: CENTRES };
   p = await newPage(`localStorage.setItem("tshk-session", ${JSON.stringify(adminSess)});localStorage.setItem("tshk-welcome", ${JSON.stringify(adminSeen)});`);
   await p.goto(srv.url + "/"); await p.waitForTimeout(900);
   await p.click("#acct"); await p.waitForTimeout(200); await p.click("#m-admin-open"); await p.waitForTimeout(600);
-  ok(await vis(p, "m-admin"), "the admin panel opens for an admin");
-  ok(await p.evaluate(() => document.querySelectorAll("#m-user-list .m-row-card").length) === 3, "members are listed");
-  ok(await p.evaluate(() => document.querySelectorAll("#m-user-list .m-acts").length) === 1, "actions are hidden for yourself and for other admins");
+  await ok(await vis(p, "m-admin"), "the admin panel opens for an admin");
+  await ok(await p.evaluate(() => document.querySelectorAll("#m-user-list .m-row-card").length) === 3, "members are listed");
+  await ok(await p.evaluate(() => document.querySelectorAll("#m-user-list .m-acts").length) === 1, "actions are hidden for yourself and for other admins");
   await p.fill("#m-user-q", "bob"); await p.waitForTimeout(500);
-  ok(await p.evaluate(() => document.querySelectorAll("#m-user-list .m-row-card").length) === 1, "the search filters by e-mail");
+  await ok(await p.evaluate(() => document.querySelectorAll("#m-user-list .m-row-card").length) === 1, "the search filters by e-mail");
 
   // 11. auto-generate password: confirm first, show the password once, then clear it
   await p.click("#m-user-list .m-acts button:nth-child(1)"); await p.waitForTimeout(300);
-  ok(await vis(p, "m-modal") && state.resetCalls === 0, "a confirm dialog comes first, nothing is sent yet");
+  await ok(await vis(p, "m-modal") && state.resetCalls === 0, "a confirm dialog comes first, nothing is sent yet");
   await p.click("#m-modal-ok"); await p.waitForTimeout(500);
-  ok((await txt(p, "m-modal-pw")) === "Abc3def5ghij", "the temporary password is shown once");
-  ok((await p.evaluate(() => document.getElementById("m-modal-body").textContent)).includes("Give this to the member"), "with the instruction text");
-  ok(await vis(p, "m-modal-copy"), "and a Copy button");
+  await ok((await txt(p, "m-modal-pw")) === "Abc3def5ghij", "the temporary password is shown once");
+  await ok((await p.evaluate(() => document.getElementById("m-modal-body").textContent)).includes("Give this to the member"), "with the instruction text");
+  await ok(await vis(p, "m-modal-copy"), "and a Copy button");
   await p.click("#m-modal-ok"); await p.waitForTimeout(300);
-  ok(await p.evaluate(() => !document.body.innerHTML.includes("Abc3def5ghij")), "the password is gone from the DOM after closing");
+  await ok(await p.evaluate(() => !document.body.innerHTML.includes("Abc3def5ghij")), "the password is gone from the DOM after closing");
 
   // 12. delete: type-to-confirm, then Delete anyway after a 502
   state.deleteFailsFirst = true;
   await p.click("#m-user-list .m-acts button:nth-child(2)"); await p.waitForTimeout(300);
-  ok(await vis(p, "m-modal-input") && await p.evaluate(() => document.getElementById("m-modal-ok").disabled), "delete needs the e-mail typed");
-  ok((await p.evaluate(() => document.getElementById("m-modal-body").textContent)).includes("cancelled first"), "and warns about the subscription");
+  await ok(await vis(p, "m-modal-input") && await p.evaluate(() => document.getElementById("m-modal-ok").disabled), "delete needs the e-mail typed");
+  await ok((await p.evaluate(() => document.getElementById("m-modal-body").textContent)).includes("cancelled first"), "and warns about the subscription");
   await p.fill("#m-modal-input", "bob@example.org"); await p.waitForTimeout(150);
   await p.click("#m-modal-ok"); await p.waitForTimeout(600);
-  ok(JSON.stringify(state.deleteCalls) === '["plain"]', "the first attempt goes without force");
-  ok(await vis(p, "m-modal") && (await txt(p, "m-modal-ok")).includes("Delete anyway"), "a 502 offers an explicit Delete anyway");
+  await ok(JSON.stringify(state.deleteCalls) === '["plain"]', "the first attempt goes without force");
+  await ok(await vis(p, "m-modal") && (await txt(p, "m-modal-ok")).includes("Delete anyway"), "a 502 offers an explicit Delete anyway");
   await p.click("#m-modal-ok"); await p.waitForTimeout(600);
-  ok(JSON.stringify(state.deleteCalls) === '["plain","force"]', "the retry sends force:true");
+  await ok(JSON.stringify(state.deleteCalls) === '["plain","force"]', "the retry sends force:true");
   await p.context().close();
 
   // 13. centres admin: add, edit, delete with the server's validation
@@ -300,26 +334,26 @@ const centres = { regions: REGIONS, centres: CENTRES };
   await p.goto(srv.url + "/"); await p.waitForTimeout(900);
   await p.click("#acct"); await p.waitForTimeout(200); await p.click("#m-admin-open"); await p.waitForTimeout(400);
   await p.click("#m-adm-tab-centres"); await p.waitForTimeout(600);
-  ok(await p.evaluate(() => document.querySelectorAll("#m-c-list .m-group").length) > 1, "centres are grouped by region");
+  await ok(await p.evaluate(() => document.querySelectorAll("#m-c-list .m-group").length) > 1, "centres are grouped by region");
   await p.fill("#m-c-name", ""); await p.fill("#m-c-region", "Gauteng"); await p.click("#m-c-save"); await p.waitForTimeout(300);
-  ok((await txt(p, "m-msg")).includes("name is needed"), "name is required: " + await txt(p, "m-msg"));
+  await ok((await txt(p, "m-msg")).includes("name is needed"), "name is required: " + await txt(p, "m-msg"));
   await p.fill("#m-c-name", "Test Centre"); await p.fill("#m-c-lat", "-26.2"); await p.click("#m-c-save"); await p.waitForTimeout(300);
-  ok((await txt(p, "m-msg")).includes("both latitude and longitude"), "latitude alone is refused: " + await txt(p, "m-msg"));
+  await ok((await txt(p, "m-msg")).includes("both latitude and longitude"), "latitude alone is refused: " + await txt(p, "m-msg"));
   await p.fill("#m-c-lng", "280"); await p.click("#m-c-save"); await p.waitForTimeout(300);
-  ok((await txt(p, "m-msg")).includes("±180"), "out-of-range longitude is refused");
+  await ok((await txt(p, "m-msg")).includes("±180"), "out-of-range longitude is refused");
   await p.fill("#m-c-lng", "28.04"); await p.fill("#m-c-phone", "nope!"); await p.click("#m-c-save"); await p.waitForTimeout(300);
-  ok((await txt(p, "m-msg")).includes("phone"), "phone characters are checked");
-  ok(!state.postedCentre, "nothing was posted while the form was invalid");
+  await ok((await txt(p, "m-msg")).includes("phone"), "phone characters are checked");
+  await ok(!state.postedCentre, "nothing was posted while the form was invalid");
   await p.fill("#m-c-phone", "+27 11 555 0100"); await p.fill("#m-c-town", "Sandton"); await p.click("#m-c-save"); await p.waitForTimeout(600);
-  ok(state.postedCentre && state.postedCentre.name === "Test Centre" && state.postedCentre.lat === -26.2, "a valid centre is posted");
+  await ok(state.postedCentre && state.postedCentre.name === "Test Centre" && state.postedCentre.lat === -26.2, "a valid centre is posted");
   await p.click("#m-c-list .m-acts button:nth-child(1)"); await p.waitForTimeout(300);
-  ok(await p.evaluate(() => document.getElementById("m-c-name").value.length > 0) && await vis(p, "m-c-cancel"), "edit fills the form");
+  await ok(await p.evaluate(() => document.getElementById("m-c-name").value.length > 0) && await vis(p, "m-c-cancel"), "edit fills the form");
   await p.fill("#m-c-name", "Renamed Centre"); await p.click("#m-c-save"); await p.waitForTimeout(600);
-  ok(state.patchedCentre && state.patchedCentre.name === "Renamed Centre", "edit sends a PATCH");
+  await ok(state.patchedCentre && state.patchedCentre.name === "Renamed Centre", "edit sends a PATCH");
   await p.click("#m-c-list .m-acts button:nth-child(2)"); await p.waitForTimeout(300);
-  ok(await vis(p, "m-modal"), "delete asks first");
+  await ok(await vis(p, "m-modal"), "delete asks first");
   await p.click("#m-modal-ok"); await p.waitForTimeout(500);
-  ok(!!state.deletedCentre, "and then deletes");
+  await ok(!!state.deletedCentre, "and then deletes");
   await p.context().close();
 
   // 14. cancel a subscription: two taps, and the API is really called
@@ -327,17 +361,17 @@ const centres = { regions: REGIONS, centres: CENTRES };
   p = await newPage(`localStorage.setItem("tshk-session", ${JSON.stringify(saved)});localStorage.setItem("tshk-welcome", ${JSON.stringify(seen)});`);
   await p.goto(srv.url + "/"); await p.waitForTimeout(800);
   await p.click("#acct"); await p.waitForTimeout(300);
-  ok(!(await vis(p, "m-acct-pay")), "an active member is not offered Pay now");
-  ok(await vis(p, "m-cancel"), "and can cancel");
+  await ok(!(await vis(p, "m-acct-pay")), "an active member is not offered Pay now");
+  await ok(await vis(p, "m-cancel"), "and can cancel");
   await p.click("#m-cancel"); await p.waitForTimeout(300);
-  ok(state.cancelled === 0 && (await txt(p, "m-cancel")).includes("Tap again"), "the first tap only arms it");
+  await ok(state.cancelled === 0 && (await txt(p, "m-cancel")).includes("Tap again"), "the first tap only arms it");
   await p.click("#m-cancel"); await p.waitForTimeout(800);
-  ok(state.cancelled === 1, "the second tap calls /api/payfast/cancel");
-  ok((await txt(p, "m-msg")).includes("cancelled"), "and the member is told it is done: " + await txt(p, "m-msg"));
+  await ok(state.cancelled === 1, "the second tap calls /api/payfast/cancel");
+  await ok((await txt(p, "m-msg")).includes("cancelled"), "and the member is told it is done: " + await txt(p, "m-msg"));
   await p.context().close();
 
-  ok(errs.length === 0, "no page errors " + JSON.stringify(errs));
-  ok(state.emailCall === null, "Supabase was never asked to send a confirmation or reset e-mail");
+  await ok(errs.length === 0, "no page errors " + JSON.stringify(errs));
+  await ok(state.emailCall === null, "Supabase was never asked to send a confirmation or reset e-mail");
   await browser.close(); srv.close();
   if (FAILS) { console.log(FAILS + " check(s) failed"); process.exit(1); } else console.log("All checks passed");
 })();
