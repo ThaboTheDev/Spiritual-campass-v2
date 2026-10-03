@@ -1113,3 +1113,44 @@ test("the web app manifest is installable and its icons really exist", async () 
   assert.ok(purposes.includes("maskable"), "a maskable icon exists, so Android adaptive icons are not cropped badly");
   assert.ok(m.icons.some((i) => i.sizes === "192x192"), "a 192px icon exists, the smallest size Chrome installs");
 });
+
+/* The paywall title branches on the entitlement state. The suite covered "grace", which
+   api/_lib/entitlement.js never returns, and missed the two it does. These are the states
+   a member whose payment actually failed will see. */
+test("past_due: the paywall says this month's payment was not received", async () => {
+  const b = await boot({ me: trial({ status: "active", state: "past_due", access: false, access_until: undefined, days_left: undefined }) });
+  b.fill("m-in-email", "member@example.org"); b.fill("m-in-pw", "Trialpass1");
+  b.submit("m-signin"); await wait(5);
+  assert.equal(b.visible("m-paywall"), true, "the paywall is up, not the app");
+  assert.equal(b.ev("MEMBER.hasAccess"), false, "no access while the payment is outstanding");
+  assert.equal(b.txt("m-title").includes("not received"), true, "title: " + b.txt("m-title"));
+  assert.equal(b.txt("m-price").includes("R100"), true, "and the price is still offered: " + b.txt("m-price"));
+  assert.deepEqual(b.errors, [], "no page errors");
+  b.close();
+});
+
+test("expired: the paywall says the membership has ended", async () => {
+  const b = await boot({ me: trial({ status: "expired", state: "expired", access: false, access_until: undefined, days_left: undefined }) });
+  b.fill("m-in-email", "member@example.org"); b.fill("m-in-pw", "Trialpass1");
+  b.submit("m-signin"); await wait(5);
+  assert.equal(b.visible("m-paywall"), true, "the paywall is up");
+  assert.equal(b.txt("m-title").includes("membership has ended"), true, "title: " + b.txt("m-title"));
+  assert.equal(b.txt("m-title").includes("trial"), false, "and it is not blamed on the trial: " + b.txt("m-title"));
+  assert.deepEqual(b.errors, [], "no page errors");
+  b.close();
+});
+
+test("cancelled: access continues to the end of the paid month, and the member is told the date", async () => {
+  const until = new Date(Date.now() + 5 * 864e5).toISOString();
+  const b = await boot({ me: trial({ status: "cancelled", state: "cancelled", access: true, access_until: until, paid_through: until, renews: false, can_cancel: false }) });
+  b.fill("m-in-email", "member@example.org"); b.fill("m-in-pw", "Trialpass1");
+  b.submit("m-signin"); await wait(5);
+  b.click("m-w-trial"); await wait(3);
+  assert.equal(b.visible("member"), false, "a cancelled member keeps access until the month ends");
+  b.click("acct"); await wait(2);
+  assert.equal(b.txt("m-state").includes("Cancelled"), true, "status line: " + b.txt("m-state"));
+  assert.equal(b.el("m-acct-pay").hidden, false, "and they are offered the chance to pay again");
+  assert.equal(b.el("m-cancel").hidden, true, "with no second cancel button, since can_cancel is false");
+  assert.deepEqual(b.errors, [], "no page errors");
+  b.close();
+});
