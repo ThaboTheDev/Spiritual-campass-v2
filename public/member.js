@@ -377,7 +377,7 @@ const MEMBER = (function () {
     hide();
     if (granted) return;
     granted = true;
-    loadCentres(fromCache);
+    loadCentres(fromCache).catch(() => {});        // never an unhandled rejection
   }
   const welcomeSeen = () => { const m = store.get(WKEY) || {}; return !!email && m[email] === true; };
   function markWelcome() { if (!email) return; const m = store.get(WKEY) || {}; m[email] = true; store.set(WKEY, m); }
@@ -899,9 +899,9 @@ const MEMBER = (function () {
     if (pay) { try { history.replaceState(null, "", location.pathname); } catch (e) {} }
     if (!session || !session.access_token) { updateChip(); return show("signin"); }
     email = session.email || "";
-    check(pay);
-    setInterval(() => { if (session && !document.hidden && !view && !polling) check(); }, RECHECK_MS);
-    document.addEventListener("visibilitychange", () => { if (!document.hidden && session && !view && !polling) check(); });
+    check(pay).catch(() => show("offline", networkMsg()));
+    setInterval(() => { if (session && !document.hidden && !view && !polling) check().catch(() => {}); }, RECHECK_MS);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden && session && !view && !polling) check().catch(() => {}); });
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
   else setTimeout(start, 0);

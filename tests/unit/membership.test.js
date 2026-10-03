@@ -15,7 +15,7 @@ const FILES = ["config.js", "member.js", "geo.js", "lang.js", "app.js"];
 const SRC = Object.fromEntries(FILES.map((f) => [f, fs.readFileSync(path.join(PUB, f), "utf8")]));
 
 const OPEN = [];
-after(() => { for (const d of OPEN) { try { d.close(); } catch (e) {} } });
+after(() => { for (const c of OPEN) { try { c(); } catch (e) {} } });
 
 const TICKS = () => new Promise((r) => setTimeout(r, 0));
 const wait = async (n = 3) => { for (let i = 0; i < n; i++) await TICKS(); };
@@ -153,7 +153,6 @@ async function boot(opts) {
       win.addEventListener = (t, fn, opts2) => { state.windowEvents.push(t); return add(t, fn, opts2); };
     }
   });
-  OPEN.push(dom);
   const win = dom.window;
   await wait(2);                                   // let the document finish parsing
   for (const f of FILES) {
@@ -163,6 +162,13 @@ async function boot(opts) {
   }
   await wait(2);                                   // member.js starts on the next tick
 
+  /* one cleanup, used by b.close() and by the after hook even when an assertion fails */
+  const cleanup = () => {
+    for (const [kind, id] of state.timers) { try { kind === "i" ? win.clearInterval(id) : win.clearTimeout(id); } catch (e) {} }
+    state.timers.length = 0;
+    try { win.close(); } catch (e) {}
+  };
+  OPEN.push(cleanup);
   const el = (id) => win.document.getElementById(id);
   const visible = (id) => {
     let n = el(id);
@@ -179,11 +185,7 @@ async function boot(opts) {
     localStorage: win.localStorage,
     dump() { const o2 = {}; for (let i = 0; i < win.localStorage.length; i++) { const k = win.localStorage.key(i); o2[k] = win.localStorage.getItem(k); } return o2; },
     ev: (code) => win.eval(code),
-    close() {
-      for (const [kind, id] of state.timers) { try { kind === "i" ? win.clearInterval(id) : win.clearTimeout(id); } catch (e) {} }
-      state.timers.length = 0;
-      win.close();
-    }
+    close: cleanup
   };
 }
 const called = (calls, re) => calls.filter((c) => re.test(c.url));
@@ -674,4 +676,130 @@ test("the language switcher repaints the gate", async () => {
   await wait(3);
   assert.equal(b.txt("m-in-go").includes("Ngena"), true, "isiZulu button: " + b.txt("m-in-go"));
   b.close();
+});
+
+/* ---------- the requirements that are easy to claim and hard to notice when they break ---------- */
+
+test("every input in the gate has a label and the right autocomplete", async () => {
+  const b = await boot();
+  const bad = await b.ev(`(() => {
+    const out = [];
+    const fields = document.querySelectorAll("#member input, #member select, #m-modal input");
+    for (const f of fields) {
+      const labelled = !!document.querySelector('label[for="' + f.id + '"]') || !!f.getAttribute("aria-label");
+      if (!labelled) out.push("no label: " + f.id);
+      if (f.type === "password" && !/^(current|new)-password$/.test(f.autocomplete)) out.push("autocomplete: " + f.id + "=" + f.autocomplete);
+      if (f.type === "email" && f.autocomplete !== "username") out.push("autocomplete: " + f.id + "=" + f.autocomplete);
+    }
+    if (!fields.length) out.push("no fields found");
+    return out;
+  })()`);
+  assert.deepEqual(bad, [], "labels/autocomplete problems: " + JSON.stringify(bad));
+  const pw = await b.ev(`Array.from(document.querySelectorAll('#member input[type=password]')).map(f => f.id + ":" + f.autocomplete)`);
+  assert.equal(pw.length, 8, "eight password fields in the gate: " + JSON.stringify(pw));
+  assert.equal(pw.filter((x) => /:new-password$/.test(x)).length, 6, "the reset/change ones ask for a new password");
+  assert.equal(pw.filter((x) => /:current-password$/.test(x)).length, 2, "sign-in and the account change ask for the current one");
+  b.close();
+});
+
+test("gate controls are at least 44px and the app is hidden while locked", async () => {
+  const b = await boot();
+  const small = await b.ev(`(() => {
+    const out = [];
+    for (const id of ["m-in-go","m-up-go","m-fp-go","m-subscribe","m-w-pay","m-w-trial","m-acct-pay","m-cancel","m-admin-open","m-retry","m-modal-ok","m-modal-cancel","m-c-save","m-in-email","m-in-pw","m-tab-in","m-tab-up","m-user-q"]) {
+      const n = document.getElementById(id);
+      if (!n) { out.push("missing " + id); continue; }
+      if (getComputedStyle(n).minHeight !== "44px") out.push(id + "=" + getComputedStyle(n).minHeight);
+    }
+    return out;
+  })()`);
+  assert.deepEqual(small, [], "controls under 44px: " + JSON.stringify(small));
+  assert.equal(await b.ev(`document.body.classList.contains("locked")`), true, "the gate locks the page");
+  assert.equal(await b.ev(`getComputedStyle(document.querySelector(".app")).visibility`), "hidden", "the app is not visible behind the gate");
+  assert.equal(await b.ev(`getComputedStyle(document.querySelector(".tabs")).visibility`), "hidden", "the tab bar is not visible behind the gate");
+  b.close();
+});
+
+test("the gate markup starts hidden, so a cached shell cannot bypass sign-in", async () => {
+  assert.match(HTML, /<div class="member" id="member" hidden/, "the overlay is hidden in the markup itself");
+  assert.doesNotMatch(HTML, /<div class="member" id="member"[^h]*role="dialog"/, "and it is never served open");
+});
+
+test("the temporary password never travels in a URL", async () => {
+  const b = await boot({ me: adminMe, seed: adminSeed, state: { adminUsers: ADMINS } });
+  await wait(6);
+  b.click("acct"); await wait(2); b.click("m-admin-open"); await wait(5);
+  b.el("m-user-list").querySelector(".m-acts button").dispatchEvent(new b.win.MouseEvent("click", { bubbles: true }));
+  await wait(2); b.click("m-modal-ok"); await wait(4);
+  const pw = "Abc3def5ghij";
+  assert.equal(b.txt("m-modal-pw"), pw, "it is on screen");
+  const urls = b.calls.map((c) => c.url).filter((u) => u.includes(pw));
+  assert.deepEqual(urls, [], "no request URL carries the password");
+  assert.equal(b.win.location.href.includes(pw), false, "the address bar is clean");
+  assert.equal(b.dump()["tshk-ent"] && b.dump()["tshk-ent"].includes(pw), false, "and it is not in the stored entitlement");
+  b.close();
+});
+
+test("no unhandled promise rejections across the flows", async () => {
+  const seen = [];
+  const onRej = (r) => seen.push(String(r && r.reason || r));
+  process.on("unhandledRejection", onRej);
+  try {
+    const flows = [
+      { me: trial() },
+      { me: trial({ must_change_password: true }) },
+      { me: adminMe, state: { adminUsers: ADMINS, deleteFailsFirst: true } },
+      { online: false, seed: { "tshk-session": sess() } },
+      { state: { centresStatus: { status: 500, body: { error: "server_error" } } } }
+    ];
+    for (const f of flows) {
+      const b = await boot(Object.assign({ seed: { "tshk-welcome": JSON.stringify({ "member@example.org": true }) } }, f));
+      await wait(8);
+      if (b.visible("m-in-email")) { b.fill("m-in-email", "member@example.org"); b.fill("m-in-pw", "Trialpass1"); b.submit("m-signin"); await wait(8); }
+      if (b.visible("m-forcepw")) { b.fill("m-fp-pw", "Brandnew1"); b.fill("m-fp-pw2", "Brandnew1"); b.submit("m-forcepw"); await wait(8); }
+      if (b.visible("m-admin-open")) { b.click("m-admin-open"); await wait(6); }
+      if (b.visible("m-retry")) { b.click("m-retry"); await wait(6); }
+      assert.deepEqual(b.errors, [], "no page errors in " + JSON.stringify(f.me && f.me.state));
+      b.close();
+    }
+    await wait(10);
+    assert.deepEqual(seen, [], "unhandled rejections: " + JSON.stringify(seen));
+  } finally { process.off("unhandledRejection", onRej); }
+});
+const sess = () => JSON.stringify({ access_token: "t", refresh_token: "r", expires_at: Date.now() + 36e5, email: "member@example.org" });
+
+test("the service worker refuses to cache the API, auth, PayFast and the one-use pages", async () => {
+  const src = fs.readFileSync(path.join(PUB, "sw.js"), "utf8");
+  assert.match(src, /tshk-compass-sub-v(?!2\b)\d+/, "the cache version is bumped");
+  const listeners = {};
+  const cacheStore = { put: [], cached: [], match: async () => undefined, addAll: async () => {} };
+  cacheStore.put = async (key) => { cacheStore.cached.push(String(key && key.url || key)); };
+  const run = new Function("self", "caches", "location", "fetch", src + "\n;return self.__l;");
+  const selfStub = { addEventListener: (t, fn) => { listeners[t] = fn; }, skipWaiting: () => {}, clients: { claim: async () => {} } };
+  const exported = run(selfStub,
+    { open: async () => cacheStore, keys: async () => [], delete: async () => {} },
+    new URL("http://localhost/sw.js"),
+    async () => ({ ok: true, clone() { return this; } }));
+  void exported;
+  selfStub.__l = listeners;
+  const pending = [];
+  const responded = (url, mode) => {
+    let hit = false;
+    listeners.fetch({ request: { url, method: "GET", mode: mode || "navigate" }, respondWith: (p) => { hit = true; pending.push(Promise.resolve(p).catch(() => {})); } });
+    return hit;
+  };
+  for (const [url, why] of [
+    ["http://localhost/api/me", "the membership API"],
+    ["http://localhost/api/centres", "the centres API"],
+    ["https://proj.supabase.co/auth/v1/token?grant_type=password", "Supabase auth"],
+    ["https://sandbox.payfast.co.za/eng/process", "PayFast"],
+    ["http://localhost/reset", "the reset page"],
+    ["http://localhost/confirmed", "the confirmation page"],
+    ["https://tile.openstreetmap.org/3/4/5.png", "map tiles"]
+  ]) assert.equal(responded(url, url.startsWith("http://localhost/") ? "navigate" : "cors"), false, why + " is never served from the worker");
+  assert.equal(responded("http://localhost/index.html", "navigate"), true, "the app shell is still cached for offline");
+  assert.equal(responded("http://localhost/app.js", "no-cors"), true, "and so are the app files");
+  await Promise.all(pending);                                   // let the worker finish writing
+  assert.ok(cacheStore.cached.some((k) => k.endsWith("/index.html")), "the shell goes into the cache: " + JSON.stringify(cacheStore.cached));
+  assert.equal(cacheStore.cached.some((k) => k.includes("/api/")), false, "and no API response ever does");
 });
