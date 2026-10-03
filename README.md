@@ -47,8 +47,15 @@ api/
   payfast/checkout.js    POST → signed PayFast subscription form
   payfast/notify.js      POST ← PayFast ITN (payment notifications)
   payfast/cancel.js      POST → cancel via PayFast API
+  account/change-password.js  POST → change own password (current password required unless an admin reset it)
+  admin/users.js         GET  → members for the admin list (admins only)
+  admin/reset-password.js     POST → set a temporary password, returned once, forced change at next sign-in
+  admin/delete-user.js   POST → cancel the subscription first, then delete the account
+  admin/centres.js       GET/POST/PATCH/DELETE → centre directory (admins only)
   _lib/                  env, http, supabase, entitlement, payfast signing/verification, ITN logic, centres data (not routes)
 supabase/schema.sql      Tables, security policies, admin view
+supabase/seed_centres.sql     The 88 centres (no rows are inserted by the schema)
+vercel.json              Output directory public/, Node runtime
 tests/unit/              API tests (signatures vs the PayFast PHP reference, ITN rules, entitlement,
                          full API cycle) plus membership.test.js, which runs the real public/ files
                          in jsdom against a mocked Supabase and /api/*
@@ -64,7 +71,9 @@ No npm packages are needed at runtime: the functions use Node 18+ built-ins (`fe
 ### 1. Supabase (accounts and database)
 1. Create a project at https://supabase.com (choose a region close to South Africa, for example `eu-west` or `af-south` if offered).
    For production use a paid plan; free projects may be paused when inactive.
-2. **SQL Editor** → paste and run `supabase/schema.sql`.
+2. **SQL Editor** → paste and run `supabase/schema.sql`, then `supabase/seed_centres.sql`.
+   The seed holds the 88 centres; the schema itself inserts no rows, so without it the Centres
+   tab is empty until you add centres by hand. The seed is safe to run again.
 3. **Authentication → Providers → Email**: enabled, **"Confirm email" OFF** (so signing up creates the account at once and Supabase sends nothing),
    minimum password length 8. Leave **Project Settings → Auth → SMTP** empty: this app needs no mail server.
 4. **Authentication → URL Configuration**: Site URL = your app address (nothing else is needed).
