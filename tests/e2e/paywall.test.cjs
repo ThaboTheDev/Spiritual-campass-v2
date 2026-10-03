@@ -82,7 +82,9 @@ const centres = { regions: REGIONS, centres: ROWS };
 
   async function newPage(init, opts) {
     const o = opts || {};
-    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true });
+    const ctx = await browser.newContext({
+      viewport: { width: o.width || 390, height: o.height || 844 }, isMobile: true
+    });
     const page = await ctx.newPage();
     CUR = page;
     page.on("pageerror", (e) => errs.push(e.message));
@@ -389,6 +391,51 @@ const centres = { regions: REGIONS, centres: ROWS };
   await p.click("#m-cancel"); await p.waitForTimeout(800);
   await ok(state.cancelled === 1, "the second tap calls /api/payfast/cancel");
   await ok((await txt(p, "m-msg")).includes("cancelled"), "and the member is told it is done: " + await txt(p, "m-msg"));
+  await p.context().close();
+
+  // 15. the 320px layout. jsdom has no layout engine, so this is the only place
+  //     the narrow-width rule and the real rendered control sizes are checked.
+  state.me = trial();
+  p = await newPage(null, { width: 320, height: 700 });
+  await p.goto(srv.url + "/"); await p.waitForTimeout(500);
+  await ok(await vis(p, "m-auth"), "the gate is up at 320px");
+  const narrow = await p.evaluate(() => {
+    const gate = document.getElementById("member");
+    const out = { sticksOut: [], small: [], unlabelled: [] };
+    for (const e of gate.querySelectorAll("*")) {
+      const r = e.getBoundingClientRect();
+      if (r.width && (r.right > window.innerWidth + 1 || r.left < -1)) {
+        out.sticksOut.push((e.id || e.className || e.tagName) + " " + Math.round(r.left) + ".." + Math.round(r.right));
+      }
+    }
+    for (const b of gate.querySelectorAll("button, .btn")) {
+      const r = b.getBoundingClientRect();
+      if (r.height && r.height < 44) out.small.push((b.id || b.className || b.tagName) + "=" + Math.round(r.height));
+    }
+    for (const f of gate.querySelectorAll("input")) {
+      if (!document.querySelector('label[for="' + f.id + '"]') && !f.getAttribute("aria-label")) out.unlabelled.push(f.id);
+    }
+    out.docOverflow = document.documentElement.scrollWidth > window.innerWidth + 1;
+    for (const k of ["sticksOut", "small", "unlabelled"]) out[k] = out[k].slice(0, 6);
+    return out;
+  });
+  await ok(!narrow.docOverflow, "the page does not scroll sideways at 320px: " + JSON.stringify(narrow));
+  await ok(narrow.sticksOut.length === 0, "no gate element sticks out at 320px: " + JSON.stringify(narrow.sticksOut));
+  await ok(narrow.small.length === 0, "every gate button is at least 44px tall: " + JSON.stringify(narrow.small));
+  await ok(narrow.unlabelled.length === 0, "every gate input has a label: " + JSON.stringify(narrow.unlabelled));
+  await p.context().close();
+
+  // and the app itself, once it is open
+  p = await newPage(seeded(saved), { width: 320, height: 700 });
+  await p.goto(srv.url + "/"); await p.waitForTimeout(900);
+  await ok(!(await vis(p, "member")), "the app opens at 320px");
+  const wide = await p.evaluate(() => ({
+    docOverflow: document.documentElement.scrollWidth > window.innerWidth + 1,
+    scrollWidth: document.documentElement.scrollWidth,
+    innerWidth: window.innerWidth,
+    rows: document.querySelectorAll("#c-list .c-item").length,
+  }));
+  await ok(!wide.docOverflow, "the centres list does not scroll sideways at 320px: " + JSON.stringify(wide));
   await p.context().close();
 
   await ok(errs.length === 0, "no page errors " + JSON.stringify(errs));
