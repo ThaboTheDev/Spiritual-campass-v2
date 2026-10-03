@@ -115,23 +115,27 @@ Nothing in this flow sends an e-mail — not the app, not Supabase.
 - [ ] With `STORE_BUILD: true` in `public/config.js`, the paywall still appears but shows no PayFast
       button, and the wording asks the member to sign in with a member account.
 
+## What the automated tests do cover
+
+`.github/workflows/tests.yml` runs on every push and pull request to `main`, on
+Ubuntu with Node 22, PHP 8.2 and a real Chromium:
+
+- **Unit and API: 94 tests, 0 skipped.** PHP is installed, so the six tests that
+  compare the Node signing code against PayFast's own PHP reference
+  (`tests/unit/php-reference.php`) byte for byte all run and pass — the
+  checkout, ITN and API signatures included.
+- **Browser: 70 assertions.** `tests/e2e/paywall.test.cjs` drives the whole
+  membership flow in Chromium against a mocked backend: sign-up with no
+  confirmation e-mail, the one-time welcome page, the paywall and the signed
+  PayFast form it posts, `?payment=success` polling, the forced password change,
+  402/403 from `/api/centres`, the offline rule against `access_until`, the admin
+  area and the cancel flow.
+
 ## What has not been verified automatically
 
 Everything above is a manual run for that reason. These are the things the
 automated tests in this repository could **not** prove:
 
-- **The Playwright suite has never been executed.** `npm run test:e2e` needs a
-  Chromium binary and none could be downloaded in the environment where this was
-  written. Its selectors are checked against the shipped DOM by
-  `npm test` (which reads `tests/e2e/paywall.test.cjs` and probes the real
-  pages), so a renamed id fails there — but the flows themselves have only been
-  run in jsdom, not in a browser.
-- **The PayFast signature comparisons are skipped.** Six tests in
-  `tests/unit/` compare the Node signing code against PayFast's own PHP
-  reference (`tests/unit/php-reference.php`) byte for byte. They skip when PHP
-  is not on the PATH. Run `npm test` on a machine with PHP installed and confirm
-  they pass before going live; that is the only proof the signatures will
-  validate on PayFast's server.
 - **Nothing has touched your real Supabase project, Vercel deployment or PayFast
   sandbox account.** The app was exercised against a local mock of the same
   contract, so an environment mistake (wrong key, missing passphrase,
@@ -141,10 +145,13 @@ automated tests in this repository could **not** prove:
   "Confirm email" enabled, sign-up returns no session and the app says the
   account still asks for confirmation. Turn it off; there is deliberately no
   client-side workaround.
-- **Real-device behaviour.** jsdom has no layout engine, no sensors and no
-  service worker, so the 320px layout, safe-area insets, focus rings, iOS
-  motion-permission prompts, PWA install and true offline behaviour are
-  unverified. Check them on a phone.
+- **Real-device behaviour.** The browser suite runs in Chromium at 390×844 with
+  `isMobile: true`, so the layout engine and the sensor/geolocation spies are
+  real, and it proves the centres tab starts no compass sensors. It still cannot
+  cover the **320px** width, safe-area insets on a notched phone, visible focus
+  rings, the iOS motion-permission prompt, PWA install, or true airplane-mode
+  offline (the suite simulates offline with `navigator.onLine`, not a dead
+  radio). Check those on a phone.
 - **The 378 Portuguese, Chichewa and iciBemba strings need a native speaker.**
   See `docs/translations-to-review.md`.
 - **Grace-period rendering is defensive.** The client shows a "payment is late"
