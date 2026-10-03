@@ -12,6 +12,13 @@ const serve = () => new Promise((res) => {
     let p = q.url.split("?")[0]; if (p === "/") p = "/index.html";
     const f = path.join(ROOT, p);
     if (!f.startsWith(ROOT) || !fs.existsSync(f) || fs.statSync(f).isDirectory()) { r.writeHead(404); return r.end(); }
+    /* config.js ships with the YOUR-PROJECT placeholder. member.js refuses to call auth for a
+       placeholder (that is the misconfigured-deploy guard), so serve a configured value - still on
+       supabase.co, which is what the mocked auth routes match on. */
+    if (p === "/config.js") {
+      const body = fs.readFileSync(f, "utf8").replace(/SUPABASE_URL: "[^"]*"/, 'SUPABASE_URL: "https://tshk-e2e.supabase.co"');
+      r.writeHead(200, { "Content-Type": TYPES[".js"] }); return r.end(body);
+    }
     r.writeHead(200, { "Content-Type": TYPES[path.extname(f)] || "application/octet-stream" }); fs.createReadStream(f).pipe(r);
   });
   s.listen(0, () => res({ url: `http://localhost:${s.address().port}`, close: () => s.close() }));
