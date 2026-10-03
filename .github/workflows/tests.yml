@@ -45,8 +45,10 @@ jobs:
       - name: Surface unit failures
         if: steps.unit.outcome == 'failure'
         run: |
-          grep -E "^(not ok|# (tests|pass|fail|skipped))|^  (error|actual|expected|code|operator):" /tmp/unit.log \
-            | head -40 | tr -d '\r' | sed -e 's/%/%25/g' -e 's/^/::error::/'
+          # Any indentation: a file-level failure nests the real assertion deeper,
+          # and a shallow grep reports only the wrapper.
+          grep -nE "not ok|^\s*(error|actual|expected|code|operator|failureType|stack):" /tmp/unit.log \
+            | head -60 | tr -d '\r' | cut -c1-300 | sed -e 's/%/%25/g' -e 's/^/::error::/'
           exit 1
 
       # Reported separately rather than folded into `npm test`, because this is the
