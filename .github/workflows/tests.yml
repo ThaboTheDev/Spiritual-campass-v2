@@ -31,24 +31,37 @@ jobs:
       - name: Confirm PHP is available
         run: php -v
 
+      # shell: bash gives -eo pipefail; the `set` line is belt-and-braces, because
+      # piping into tee without pipefail makes the step exit with tee's status and
+      # a failing npm test would be reported as a pass.
       - name: Unit and API tests
         id: unit
         continue-on-error: true
-        run: npm test 2>&1 | tee /tmp/test.log
+        shell: bash
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee /tmp/unit.log
 
-      # The runner log blob is not always reachable, so surface the failing
-      # assertions as annotations, which are readable from the API.
-      - name: Surface failures
+      - name: Surface unit failures
         if: steps.unit.outcome == 'failure'
         run: |
-          grep -E "^(not ok|# (tests|pass|fail|skipped))|^  (error|actual|expected|code|operator):" /tmp/test.log \
-            | head -40 | sed -e 's/%/%25/g' -e 's/^/::error::/'
+          grep -E "^(not ok|# (tests|pass|fail|skipped))|^  (error|actual|expected|code|operator):" /tmp/unit.log \
+            | head -40 | tr -d '\r' | sed -e 's/%/%25/g' -e 's/^/::error::/'
           exit 1
 
-      # Playwright browsers are not installed here on purpose: this suite is the one
-      # that needs a real browser, and it is reported separately rather than silently
-      # skipped inside `npm test`.
+      # Reported separately rather than folded into `npm test`, because this is the
+      # one suite that needs a real browser.
       - name: Browser suite (membership flows, backend mocked)
+        id: e2e
+        continue-on-error: true
+        shell: bash
         run: |
+          set -o pipefail
           npx playwright install --with-deps chromium
-          npm run test:e2e
+          npm run test:e2e 2>&1 | tee /tmp/e2e.log
+
+      - name: Surface browser failures
+        if: steps.e2e.outcome == 'failure'
+        run: |
+          grep -E "FAIL|failed|Error|✗|✘" /tmp/e2e.log | head -40 | tr -d '\r' | sed -e 's/%/%25/g' -e 's/^/::error::/'
+          exit 1
