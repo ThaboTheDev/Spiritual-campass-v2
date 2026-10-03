@@ -32,7 +32,18 @@ jobs:
         run: php -v
 
       - name: Unit and API tests
-        run: npm test
+        id: unit
+        continue-on-error: true
+        run: npm test 2>&1 | tee /tmp/test.log
+
+      # The runner log blob is not always reachable, so surface the failing
+      # assertions as annotations, which are readable from the API.
+      - name: Surface failures
+        if: steps.unit.outcome == 'failure'
+        run: |
+          grep -E "^(not ok|# (tests|pass|fail|skipped))|^  (error|actual|expected|code|operator):" /tmp/test.log \
+            | head -40 | sed -e 's/%/%25/g' -e 's/^/::error::/'
+          exit 1
 
       # Playwright browsers are not installed here on purpose: this suite is the one
       # that needs a real browser, and it is reported separately rather than silently
