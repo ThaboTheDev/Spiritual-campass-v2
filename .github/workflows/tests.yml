@@ -71,3 +71,27 @@ jobs:
         run: |
           grep -E "FAIL|state:|failed|Error|TimeoutError" /tmp/e2e.log | head -60 | tr -d '\r' | cut -c1-400 | sed -e 's/%/%25/g' -e 's/^/::error::/'
           exit 1
+
+      # The counts are the point of the run, so publish them where they can be read
+      # without the log viewer, and keep the raw output as an artifact.
+      - name: Publish results
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "unit:"
+            grep -E "^# (tests|pass|fail|skipped|cancelled|todo)" /tmp/unit.log || true
+            echo "browser:"
+            echo "  assertions passed: $(grep -c '^PASS ' /tmp/e2e.log || true)"
+            echo "  assertions failed: $(grep -c '^FAIL ' /tmp/e2e.log || true)"
+          } | tr -d '\r' | sed -e 's/%/%25/g' -e 's/^/::notice::/'
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs
+          path: |
+            /tmp/unit.log
+            /tmp/e2e.log
+          if-no-files-found: ignore
