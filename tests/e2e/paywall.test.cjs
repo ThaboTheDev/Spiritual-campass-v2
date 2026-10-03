@@ -275,7 +275,7 @@ const centres = { regions: REGIONS, centres: CENTRES };
   // 9. offline: inside and beyond the cached access_until
   state.me = trial();
   const cached = JSON.stringify(Object.assign(active(), { checked: Date.now() }));
-  let offlineInit = `window.__offline = true;localStorage.setItem("tshk-session", ${JSON.stringify(saved)});localStorage.setItem("tshk-welcome", ${JSON.stringify(seen)});localStorage.setItem("tshk-ent", ${JSON.stringify(cached)});localStorage.setItem("tshk-centres", ${JSON.stringify(JSON.stringify(centres))});`;
+  let offlineInit = `window.__offline = true;${seeded(saved)}localStorage.setItem("tshk-ent", ${JSON.stringify(cached)});localStorage.setItem("tshk-centres", ${JSON.stringify(JSON.stringify(centres))});`;
   p = await newPage(offlineInit, { offline: true });
   await p.goto(srv.url + "/"); await p.waitForTimeout(900);
   await ok(!(await vis(p, "member")), "offline inside access_until: the app still works");
