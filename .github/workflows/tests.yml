@@ -1,0 +1,43 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # The six PayFast signature tests compare the Node code against PayFast's own PHP
+      # reference (tests/unit/php-reference.php). They skip without PHP, so install it:
+      # that comparison is the only proof the signatures validate on PayFast's server.
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          tools: none
+
+      - name: Install
+        run: npm ci
+
+      - name: Confirm PHP is available
+        run: php -v
+
+      - name: Unit and API tests
+        run: npm test
+
+      # Playwright browsers are not installed here on purpose: this suite is the one
+      # that needs a real browser, and it is reported separately rather than silently
+      # skipped inside `npm test`.
+      - name: Browser suite (membership flows, backend mocked)
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:e2e
