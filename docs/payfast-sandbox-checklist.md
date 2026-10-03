@@ -129,7 +129,7 @@ Ubuntu with Node 22, PHP 8.2 and a real Chromium:
   why), the 15-minute re-check of `/api/me`, and the web app manifest — its
   required fields, that `index.html` links it, that every icon it names is a real
   PNG, and that each file's true pixel size matches the size declared beside it.
-- **Browser: 83 assertions.** `tests/e2e/paywall.test.cjs` drives the whole
+- **Browser: 88 assertions.** `tests/e2e/paywall.test.cjs` drives the whole
   membership flow in Chromium against a mocked backend: sign-up with no
   confirmation e-mail, the one-time welcome page, the paywall and the signed
   PayFast form it posts, `?payment=success` polling, the forced password change,
@@ -140,6 +140,12 @@ Ubuntu with Node 22, PHP 8.2 and a real Chromium:
   no Supabase or PayFast call and no one-use page is ever stored, while the app
   shell is, all under the versioned cache name. That exercises
   `caches.addAll(CORE)` for real, so a missing shell file fails here.
+- **True offline.** After the worker has cached the shell, the suite calls
+  `setOffline(true)`, installs an abort-all route, and reloads — so the network
+  is genuinely dead, not merely reported as down. The app still opens from the
+  cached shell, the centres still render, and they are labelled as an offline
+  copy. This is the promise the PWA makes, and it is now proven rather than
+  assumed.
 
 ## What has not been verified automatically
 
@@ -162,9 +168,8 @@ automated tests in this repository could **not** prove:
   extends past the viewport, every gate button really renders 44px tall and every
   input has a label; and a step walking the real Tab order proves the
   `:focus-visible` ring is applied and at least 2px wide. Chromium still cannot
-  cover safe-area insets on a notched phone, the iOS motion-permission prompt,
-  PWA install, or true airplane-mode offline (the suite simulates offline with
-  `navigator.onLine`, not a dead radio). Check those on a phone.
+  cover safe-area insets on a notched phone, the iOS motion-permission prompt, or
+  the PWA install prompt itself. Check those on a phone.
 - **The 378 Portuguese, Chichewa and iciBemba strings need a native speaker.**
   See `docs/translations-to-review.md`.
 - **Grace-period rendering is defensive.** The client shows a "payment is late"
