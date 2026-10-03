@@ -12,9 +12,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Node 22, not 20: jsdom 30 declares engines ^22.22.2 || ^24.15.0 || >=26.
+      # npm does not enforce engines, so Node 20 installs fine and then
+      # membership.test.js - the only jsdom consumer - dies at import time,
+      # which reports as one failed file with its ~41 subtests never running.
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       # The six PayFast signature tests compare the Node code against PayFast's own PHP
