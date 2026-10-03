@@ -897,3 +897,28 @@ test("every selector in the Playwright suite matches the real DOM", async () => 
   const missing = [...sels].filter((s) => !hits.get(s));
   assert.deepEqual(missing, [], "selectors in tests/e2e/paywall.test.cjs that match nothing: " + JSON.stringify(missing));
 });
+
+test("an unknown state from the server is treated defensively", async () => {
+  // access is decided by the boolean, never by guessing the state string
+  let b = await boot({ me: trial({ state: "some_future_state", access: true }), seed: { "tshk-session": sess(), "tshk-welcome": JSON.stringify({ "member@example.org": true }) } });
+  await wait(8);
+  assert.equal(b.visible("member"), false, "access:true opens the app even for a state the client does not know");
+  assert.equal(b.ev("MEMBER.hasAccess"), true, "access granted");
+  b.click("acct"); await wait(2);
+  assert.equal(b.txt("m-state").includes("No active membership"), true, "and the status line falls back safely: " + b.txt("m-state"));
+  b.close();
+
+  b = await boot({ me: trial({ state: "mystery", access: false, days_left: undefined, access_until: undefined }), seed: { "tshk-session": sess(), "tshk-welcome": JSON.stringify({ "member@example.org": true }) } });
+  await wait(8);
+  assert.equal(b.visible("m-paywall"), true, "access:false gates, whatever the state says");
+  assert.equal(b.visible("m-subscribe"), true, "with a way to pay");
+  assert.deepEqual(b.errors, [], "no page errors");
+  b.close();
+
+  // and a malformed body must not throw
+  b = await boot({ seed: { "tshk-session": sess() }, state: { meStatus: { status: 200, body: null } } });
+  await wait(8);
+  assert.equal(b.visible("member"), true, "a malformed /api/me keeps the gate up");
+  assert.deepEqual(b.errors, [], "and does not throw");
+  b.close();
+});
