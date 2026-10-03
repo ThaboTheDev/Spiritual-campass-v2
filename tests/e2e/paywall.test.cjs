@@ -57,7 +57,19 @@ const serve = () => new Promise((res) => {
   s.listen(0, () => res({ url: `http://localhost:${s.address().port}`, close: () => s.close() }));
 });
 const { REGIONS, CENTRES } = (() => { const src = fs.readFileSync(path.join(__dirname, "..", "..", "api", "_lib", "centres-data.js"), "utf8").replace(/export const /g, "const "); return new Function(src + ";return {REGIONS,CENTRES};")(); })();
-const centres = { regions: REGIONS, centres: CENTRES };
+/* Serve the centres through the real publicCentre(): it sends the long keys the admin area
+   reads AND the short ones app.js renders from. Feeding it the bare seed rows left every
+   centre with region === undefined, so the admin list collapsed into a single group. */
+const { publicCentre } = (() => {
+  const src = fs.readFileSync(path.join(__dirname, "..", "..", "api", "_lib", "centres.js"), "utf8")
+    .replace(/export function /g, "function ").replace(/export const /g, "const ");
+  return new Function(src + ";return {publicCentre};")();
+})();
+const ROWS = CENTRES.map((c, i) => publicCentre({
+  id: "c" + (i + 1), name: c.n, region: c.r, address: c.a, town: "", phone: c.p,
+  lat: c.la, lng: c.lo, verified: true
+}));
+const centres = { regions: REGIONS, centres: ROWS };
 
 (async () => {
   const srv = await serve(); const browser = await chromium.launch(); const errs = [];
@@ -74,6 +86,9 @@ const centres = { regions: REGIONS, centres: CENTRES };
     const page = await ctx.newPage();
     CUR = page;
     page.on("pageerror", (e) => errs.push(e.message));
+    /* Must be registered before the spy script below: init scripts run in registration
+       order, and that script only forces navigator.onLine to false when this is set. */
+    if (o.offline) await page.addInitScript(() => { window.__offline = true; });
     await page.addInitScript(() => {
       window.__spy = { gps: 0, sensors: [] };
       const geo = navigator.geolocation;
@@ -147,7 +162,6 @@ const centres = { regions: REGIONS, centres: CENTRES };
       if (r.request().method() === "PATCH") { state.patchedCentre = b; return r.fulfill({ json: { centre: Object.assign({ id: b.id }, b) } }); }
       state.deletedCentre = b; return r.fulfill({ json: { ok: true } });
     });
-    if (o.offline) await page.addInitScript(() => { window.__offline = true; });
     return page;
   }
   const vis = (page, id) => page.evaluate((i) => { let e = document.getElementById(i); if (!e) return false; for (; e; e = e.parentElement) { if (e.hidden || getComputedStyle(e).display === "none") return false; } return true; }, id);
