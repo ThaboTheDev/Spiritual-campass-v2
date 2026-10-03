@@ -157,7 +157,15 @@ const centres = { regions: REGIONS, centres: CENTRES };
   const active = () => trial({ status: "active", state: "active", renews: true, can_cancel: true, access_until: new Date(Date.now() + 30 * 864e5).toISOString(), paid_through: new Date(Date.now() + 30 * 864e5).toISOString() });
   const ended = () => trial({ access: false, state: "trial_ended", days_left: undefined, access_until: undefined });
   const sess = JSON.stringify({ access_token: "t", refresh_token: "r", expires_at: Date.now() + 36e5, email: "member@example.org" });
-  const seen = JSON.stringify({ "member@example.org": true });
+  /* Seed a stored session together with a "welcome already seen" marker for the SAME
+     account. welcomeSeen() keys the marker by the session's own e-mail, so pairing a
+     session with a marker for some other address leaves the app parked on the welcome
+     page - which is what every seeded step here was doing. */
+  const seeded = (sessJson) => {
+    const mail = (JSON.parse(sessJson) || {}).email || "";
+    return `localStorage.setItem("tshk-session", ${JSON.stringify(sessJson)});` +
+      `localStorage.setItem("tshk-welcome", ${JSON.stringify(JSON.stringify({ [mail]: true }))});`;
+  };
 
   // 1. first open: the gate is up and nothing starts
   state.me = trial();
@@ -206,14 +214,14 @@ const centres = { regions: REGIONS, centres: CENTRES };
   await ok(await p.evaluate(() => document.querySelectorAll("#c-list .c-item").length) === CENTRES.length, "centres come from /api/centres");
   const s2 = await p.evaluate(() => localStorage.getItem("tshk-session"));
   await p.context().close();
-  p = await newPage(`localStorage.setItem("tshk-session", ${JSON.stringify(s2)});localStorage.setItem("tshk-welcome", ${JSON.stringify(welcomeKey)});`);
+  p = await newPage(seeded(s2));
   await p.goto(srv.url + "/"); await p.waitForTimeout(900);
   await ok(!(await vis(p, "m-welcome")) && !(await vis(p, "member")), "the welcome page is not shown twice for the same account");
   await p.context().close();
 
   // 5. trial over → paywall → the PayFast form is posted
   state.me = ended();
-  p = await newPage(`localStorage.setItem("tshk-session", ${JSON.stringify(saved)});localStorage.setItem("tshk-welcome", ${JSON.stringify(seen)});`);
+  p = await newPage(seeded(saved));
   await p.goto(srv.url + "/"); await p.waitForTimeout(700);
   await ok(await vis(p, "m-paywall") && (await txt(p, "m-title")).includes("trial has ended"), "trial over: the paywall is up");
   await ok((await txt(p, "m-feats-p")).includes("offline") && (await txt(p, "m-price")) === "R100", "paywall lists features and the price");
@@ -225,7 +233,7 @@ const centres = { regions: REGIONS, centres: CENTRES };
 
   // 6. back from PayFast: poll /api/me until it turns active
   state.meQueue = [ended(), ended(), active()]; state.me = active();
-  p = await newPage(`localStorage.setItem("tshk-session", ${JSON.stringify(saved)});localStorage.setItem("tshk-welcome", ${JSON.stringify(seen)});`);
+  p = await newPage(seeded(saved));
   await p.goto(srv.url + "/?payment=success"); await p.waitForTimeout(1200);
   await ok((await txt(p, "m-title")).includes("Confirming"), "the return shows 'Confirming your payment…'");
   await p.waitForFunction(() => document.getElementById("member").hidden, null, { timeout: 30000 }).catch(() => {});
@@ -235,7 +243,7 @@ const centres = { regions: REGIONS, centres: CENTRES };
 
   // 7. forced password change blocks everything
   state.me = trial({ must_change_password: true }); state.mustChange = true;
-  p = await newPage(`localStorage.setItem("tshk-session", ${JSON.stringify(saved)});localStorage.setItem("tshk-welcome", ${JSON.stringify(seen)});`);
+  p = await newPage(seeded(saved));
   await p.goto(srv.url + "/"); await p.waitForTimeout(800);
   await ok(await vis(p, "m-forcepw"), "must_change_password shows the blocking screen");
   await ok(!(await vis(p, "m-auth")) && !(await vis(p, "m-account")) && !(await vis(p, "m-paywall")) && !(await vis(p, "m-welcome")), "nothing else is reachable");
@@ -253,12 +261,12 @@ const centres = { regions: REGIONS, centres: CENTRES };
 
   // 8. /api/centres 402 and 403
   state.me = trial(); state.centresStatus = { status: 402, body: { error: "subscription_required" } };
-  p = await newPage(`localStorage.setItem("tshk-session", ${JSON.stringify(saved)});localStorage.setItem("tshk-welcome", ${JSON.stringify(seen)});`);
+  p = await newPage(seeded(saved));
   await p.goto(srv.url + "/"); await p.waitForTimeout(1200);
   await ok(await vis(p, "m-paywall"), "402 from /api/centres shows the paywall");
   await p.context().close();
   state.centresStatus = { status: 403, body: { error: "password_change_required" } };
-  p = await newPage(`localStorage.setItem("tshk-session", ${JSON.stringify(saved)});localStorage.setItem("tshk-welcome", ${JSON.stringify(seen)});`);
+  p = await newPage(seeded(saved));
   await p.goto(srv.url + "/"); await p.waitForTimeout(1200);
   await ok(await vis(p, "m-forcepw"), "403 password_change_required shows the forced-change screen");
   state.centresStatus = null;
@@ -281,7 +289,7 @@ const centres = { regions: REGIONS, centres: CENTRES };
 
   // 10. admin is hidden for members, available for admins
   state.me = trial(); state.adminUsers = [];
-  p = await newPage(`localStorage.setItem("tshk-session", ${JSON.stringify(saved)});localStorage.setItem("tshk-welcome", ${JSON.stringify(seen)});`);
+  p = await newPage(seeded(saved));
   await p.goto(srv.url + "/"); await p.waitForTimeout(800);
   await p.click("#acct"); await p.waitForTimeout(300);
   await ok(!(await vis(p, "m-admin-open")), "no Admin button for a member");
@@ -289,14 +297,13 @@ const centres = { regions: REGIONS, centres: CENTRES };
 
   const adminMe = trial({ email: "admin@example.org", is_admin: true, state: "admin", status: "active" });
   const adminSess = JSON.stringify({ access_token: "a", refresh_token: "r", expires_at: Date.now() + 36e5, email: "admin@example.org" });
-  const adminSeen = JSON.stringify({ "admin@example.org": true });
   const users = [
     { user_id: "u-admin", email: "admin@example.org", status: "active", created_at: "2026-01-01", trial_ends_at: null, paid_through: null, is_admin: true, must_change_password: false, state: "admin", has_subscription: false, is_you: true },
     { user_id: "u-boss", email: "boss@example.org", status: "active", created_at: "2026-01-01", trial_ends_at: null, paid_through: null, is_admin: true, must_change_password: false, state: "admin", has_subscription: false, is_you: false },
     { user_id: "u-bob", email: "bob@example.org", status: "trialing", created_at: "2026-02-01", trial_ends_at: new Date(Date.now() + 3 * 864e5).toISOString(), paid_through: null, is_admin: false, must_change_password: true, state: "trial", has_subscription: true, is_you: false }
   ];
   state.me = adminMe; state.adminUsers = users;
-  p = await newPage(`localStorage.setItem("tshk-session", ${JSON.stringify(adminSess)});localStorage.setItem("tshk-welcome", ${JSON.stringify(adminSeen)});`);
+  p = await newPage(seeded(adminSess));
   await p.goto(srv.url + "/"); await p.waitForTimeout(900);
   await p.click("#acct"); await p.waitForTimeout(200); await p.click("#m-admin-open"); await p.waitForTimeout(600);
   await ok(await vis(p, "m-admin"), "the admin panel opens for an admin");
@@ -330,7 +337,7 @@ const centres = { regions: REGIONS, centres: CENTRES };
 
   // 13. centres admin: add, edit, delete with the server's validation
   state.me = adminMe;
-  p = await newPage(`localStorage.setItem("tshk-session", ${JSON.stringify(adminSess)});localStorage.setItem("tshk-welcome", ${JSON.stringify(adminSeen)});`);
+  p = await newPage(seeded(adminSess));
   await p.goto(srv.url + "/"); await p.waitForTimeout(900);
   await p.click("#acct"); await p.waitForTimeout(200); await p.click("#m-admin-open"); await p.waitForTimeout(400);
   await p.click("#m-adm-tab-centres"); await p.waitForTimeout(600);
@@ -358,7 +365,7 @@ const centres = { regions: REGIONS, centres: CENTRES };
 
   // 14. cancel a subscription: two taps, and the API is really called
   state.me = active(); state.cancelled = 0;
-  p = await newPage(`localStorage.setItem("tshk-session", ${JSON.stringify(saved)});localStorage.setItem("tshk-welcome", ${JSON.stringify(seen)});`);
+  p = await newPage(seeded(saved));
   await p.goto(srv.url + "/"); await p.waitForTimeout(800);
   await p.click("#acct"); await p.waitForTimeout(300);
   await ok(!(await vis(p, "m-acct-pay")), "an active member is not offered Pay now");
