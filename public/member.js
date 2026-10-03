@@ -18,8 +18,10 @@ var REGIONS = [], CENTRES = [];            // filled from /api/centres once acce
 const MEMBER = (function () {
   const CFG = window.TSHK_CONFIG || {};
   /* A deploy that never edited public/config.js would otherwise show "That did not work",
-     which tells the member nothing. Say what is actually wrong, before any request goes out. */
-  const configured = () => !!(CFG.SUPABASE_URL && CFG.SUPABASE_URL.indexOf("YOUR-PROJECT") < 0);
+     which tells the member nothing. Say what is actually wrong, before any request goes out.
+     An empty string is allowed on purpose: it means "same origin", so the auth calls become
+     relative and a reverse proxy or a local mock can answer them. */
+  const configured = () => typeof CFG.SUPABASE_URL === "string" && CFG.SUPABASE_URL.indexOf("YOUR-PROJECT") < 0;
   const SKEY = "tshk-session", EKEY = "tshk-ent", CKEY = "tshk-centres", WKEY = "tshk-welcome";
   const TIMEOUT = 20000;                   // every network call gives up after 20 s
   /* window.TSHK_TIMING only exists in tests; the defaults below are what the app uses. */

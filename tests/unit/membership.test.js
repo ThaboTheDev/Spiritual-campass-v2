@@ -947,12 +947,12 @@ test("an unconfigured deploy says so, instead of \"That did not work\"", async (
   assert.deepEqual(b.errors, [], "no page errors");
   b.close();
 
-  // an empty SUPABASE_URL on the sign-in side is the same story
+  // an empty SUPABASE_URL is not an error: it means "same origin", so the calls go relative
   const b2 = await boot({ config: { SUPABASE_URL: "", SUPABASE_ANON_KEY: "", SUPABASE_CLIENT_ID: "", SUPABASE_SCOPE: "", SITE_ORIGIN: "http://localhost", STORE_BUILD: false } });
   b2.fill("m-in-email", "member@example.org"); b2.fill("m-in-pw", "Trialpass1");
-  b2.submit("m-signin"); await wait(6);
-  assert.equal(called(b2.calls, /auth\/v1\//).length, 0, "sign-in does not fire at an empty origin either");
-  assert.equal(b2.txt("m-msg").includes("Supabase settings"), true, "same clear message: " + b2.txt("m-msg"));
+  b2.submit("m-signin"); await wait(8);
+  assert.equal(called(b2.calls, /auth\/v1\/token\?grant_type=password/).length, 1, "sign-in goes to the same origin");
+  assert.equal(b2.visible("m-welcome"), true, "and it reaches the welcome page like a configured deploy");
   assert.deepEqual(b2.errors, [], "no page errors");
   b2.close();
 });
