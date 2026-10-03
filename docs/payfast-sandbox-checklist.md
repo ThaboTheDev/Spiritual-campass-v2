@@ -124,13 +124,17 @@ Ubuntu with Node 22, PHP 8.2 and a real Chromium:
   compare the Node signing code against PayFast's own PHP reference
   (`tests/unit/php-reference.php`) byte for byte all run and pass — the
   checkout, ITN and API signatures included.
-- **Browser: 79 assertions.** `tests/e2e/paywall.test.cjs` drives the whole
+- **Browser: 83 assertions.** `tests/e2e/paywall.test.cjs` drives the whole
   membership flow in Chromium against a mocked backend: sign-up with no
   confirmation e-mail, the one-time welcome page, the paywall and the signed
   PayFast form it posts, `?payment=success` polling, the forced password change,
   402/403 from `/api/centres`, the offline rule against `access_until`, the admin
   area, the cancel flow, the 320px layout with its 44px controls, and the
-  keyboard focus ring.
+  keyboard focus ring. It also registers the **real** service worker and reads
+  its `Cache`, which the jsdom suite cannot do — proving nothing under `/api/*`,
+  no Supabase or PayFast call and no one-use page is ever stored, while the app
+  shell is, all under the versioned cache name. That exercises
+  `caches.addAll(CORE)` for real, so a missing shell file fails here.
 
 ## What has not been verified automatically
 
