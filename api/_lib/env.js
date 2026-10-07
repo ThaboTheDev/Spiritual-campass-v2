@@ -24,3 +24,10 @@ export function cfg() {
     graceDays: Number(env("GRACE_DAYS", "3")),
   };
 }
+
+export function revenuecatCfg() {
+  return {
+    webhookSecret: env("REVENUECAT_WEBHOOK_SECRET"),
+    entitlementId: env("REVENUECAT_ENTITLEMENT_ID"),
+  };
+}

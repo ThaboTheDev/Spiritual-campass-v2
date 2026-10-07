@@ -1,4 +1,4 @@
-# TSHK Compass: subscription edition (PayFast, R100 per month, 7-day free trial)
+# TSHK Compass: subscription edition (PayFast and RevenueCat, 7-day free trial)
 
 This is the full TSHK Compass app plus membership:
 
@@ -8,6 +8,7 @@ This is the full TSHK Compass app plus membership:
   other methods PayFast offers). R100 is charged on subscribing and then every month until cancelled.
 - Members can cancel from the Account screen (or from PayFast's own emails). Access continues until the paid month ends.
 - If a monthly charge is late, access continues for a 3-day grace period, then the paywall returns until PayFast confirms payment.
+- Store subscriptions are verified by RevenueCat webhooks and combined with trial and PayFast access on the server.
 - Offline, a member whose membership was last confirmed as valid can keep using the compass until that date.
 
 The compass engine, languages, centres map and dashboard are identical to the main source package (see its README for how the
@@ -25,6 +26,8 @@ member.js ── POST /api/payfast/checkout► checkout.js: signed PayFast form
 browser   ── form POST ──────────────────────────────────────────────────────────► PayFast (pay R100)
 PayFast   ── ITN POST ─────────────────► notify.js: verify signature, confirm with PayFast,
                                           check amount, activate / extend / cancel ──► Supabase DB
+RevenueCat ─ webhook POST ──────────────► webhooks/revenuecat.js: authenticate and apply
+                                          idempotent entitlement lifecycle events ──► Supabase DB
 member.js ── POST /api/payfast/cancel ─► cancel.js: PayFast Subscriptions API cancel
 ```
 
@@ -47,6 +50,7 @@ api/
   payfast/checkout.js    POST → signed PayFast subscription form
   payfast/notify.js      POST ← PayFast ITN (payment notifications)
   payfast/cancel.js      POST → cancel via PayFast API
+  webhooks/revenuecat.js POST ← RevenueCat subscription lifecycle notifications
   account/change-password.js  POST → change own password (current password required unless an admin reset it)
   admin/users.js         GET  → members for the admin list (admins only)
   admin/reset-password.js     POST → set a temporary password, returned once, forced change at next sign-in
@@ -127,10 +131,26 @@ Selling a digital subscription **inside** a store app normally requires the stor
 So this code has `STORE_BUILD` in `public/config.js`:
 - `false` (website, installable web app): full PayFast subscribe flow.
 - `true` (for the store apps): the app only lets people **sign in**; it hides the price and the PayFast button. Members subscribe on
-  the website, and the same account works in the app. Do not add links or instructions inside the store app that send people to pay
-  elsewhere unless the store's current rules allow it.
-If the church later wants to sell inside the store apps, add Google Play Billing / Apple In-App Purchase (for example with
-RevenueCat) and have their server notifications update the same `members` table (`status`, `paid_through`).
+  the website, and the same account works in the app. This V2 backend provides the RevenueCat notification endpoint, but the native
+  app must still integrate the RevenueCat SDK, log in with the Supabase UUID, and expose the store purchase/restore flow. Do not add
+  links or instructions inside the store app that send people to pay elsewhere unless the store's current rules allow it.
+Store subscriptions are integrated through RevenueCat server notifications. The app must set RevenueCat's App User ID to the
+signed-in Supabase user's UUID, not the email address. Configure `REVENUECAT_ENTITLEMENT_ID` to the RevenueCat entitlement that
+unlocks this app, and set the webhook's `Authorization` header to the exact `REVENUECAT_WEBHOOK_SECRET` configured in Vercel.
+The endpoint is `POST /api/webhooks/revenuecat`. For existing databases, rerun `supabase/schema.sql`; its additive changes add
+the RevenueCat member fields, idempotency table, and transactional processing function. New databases receive the same schema
+on first run. The endpoint requires a valid JSON event, rejects bodies over 64 KiB, and returns an error to make RevenueCat retry
+when the database transaction fails.
+
+The transfer policy is deliberately strict: `TRANSFER` events are recorded but ignored, and no transfer moves access between
+Supabase users. Keep RevenueCat App User IDs tied to the authenticated Supabase UUID; a member changing accounts must subscribe
+under their new account rather than transferring a store entitlement. Purchase, renewal, and uncancellation events grant only
+the configured entitlement through its verified expiration date. Cancellation retains access until that date; refund and
+expiration events revoke store access immediately. These store fields do not overwrite PayFast or trial fields.
+Webhook processing is transactional and serialized per member. Only minimal event metadata is retained (not the full webhook
+payload), and older notifications cannot replace newer membership state. Choose and apply a retention period for processed event
+receipts that meets operational and privacy requirements; for example, delete processed rows older than the RevenueCat retry
+window plus an appropriate support buffer.
 Store rules change often; check the current Google Play Payments policy and Apple App Review Guideline 3.1 before submitting.
 
 ## Useful admin queries (Supabase SQL Editor)

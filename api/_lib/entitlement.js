@@ -24,3 +24,26 @@ export function entitlement(m, { now = new Date(), graceDays = 3 } = {}) {
   if (m.status === "trialing") return { access: false, state: "trial_ended" };
   return { access: false, state: "expired" };
 }
+
+export function storeEntitlement(m, { now = new Date() } = {}) {
+  if (!m || !["active", "cancelled"].includes(m.revenuecat_status)) return { access: false };
+  const until = m.revenuecat_entitlement_until ? Date.parse(m.revenuecat_entitlement_until) : 0;
+  if (!until || until <= now.getTime()) return { access: false };
+  return {
+    access: true,
+    state: m.revenuecat_status,
+    access_until: new Date(until).toISOString(),
+    renews: m.revenuecat_status === "active",
+    source: "store",
+  };
+}
+
+export function combineEntitlements(...entitlements) {
+  const allowed = entitlements.filter((e) => e && e.access);
+  if (!allowed.length) return entitlements[0] || { access: false, state: "none" };
+  return allowed.reduce((latest, current) => {
+    if (!latest.access_until) return latest;
+    if (!current.access_until) return current;
+    return Date.parse(current.access_until) > Date.parse(latest.access_until) ? current : latest;
+  });
+}

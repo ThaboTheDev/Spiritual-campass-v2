@@ -6,17 +6,18 @@ export function setEnv(extra = {}) {
   Object.assign(process.env, {
     SITE_URL: "https://compass.example.org", SUPABASE_URL: "https://sb.test", SUPABASE_ANON_KEY: "anon", SUPABASE_SERVICE_ROLE_KEY: "service",
     PAYFAST_MERCHANT_ID: "10000100", PAYFAST_MERCHANT_KEY: "46f0cd694581a", PAYFAST_PASSPHRASE: "jt7NOE43FZPn", PAYFAST_SANDBOX: "true",
-    PAYFAST_ENFORCE_IP: "false", SUBSCRIPTION_AMOUNT: "100", TRIAL_DAYS: "7", GRACE_DAYS: "3", ...extra,
+    PAYFAST_ENFORCE_IP: "false", SUBSCRIPTION_AMOUNT: "100", TRIAL_DAYS: "7", GRACE_DAYS: "3",
+    REVENUECAT_WEBHOOK_SECRET: "revenuecat-test-secret", REVENUECAT_ENTITLEMENT_ID: "premium", ...extra,
   });
 }
 
 export function memoryDb() {
-  const t = { members: [], checkouts: [], payments: [], centres: [] };
+  const t = { members: [], checkouts: [], payments: [], centres: [], revenuecat_events: [] };
   const credentials = {};   // email -> password (stand-in for Supabase Auth)
   const passwordLog = [];   // every admin password set: [{ id, password }]
   const deletedUsers = [];
   return {
-    t, credentials, passwordLog, deletedUsers,
+    t, credentials, passwordLog, deletedUsers, rpcFailures: 0,
     async getMember(id) { return t.members.find((r) => r.user_id === id) || null; },
     async getMemberByToken(tok) { return t.members.find((r) => r.payfast_token === tok) || null; },
     async insertMember(row) { if (!t.members.find((r) => r.user_id === row.user_id)) t.members.push({ ...row }); return [row]; },
@@ -56,6 +57,44 @@ export function installFetch(mdb, { users = { "good-token": { id: "u1", email: "
       }
     }
     if (u.host === "sb.test" && u.pathname.startsWith("/rest/v1/")) {
+      if (u.pathname === "/rest/v1/rpc/process_revenuecat_event") {
+        if (mdb.rpcFailures > 0) {
+          mdb.rpcFailures -= 1;
+          return json(500, { message: "simulated database failure" });
+        }
+        const p = JSON.parse(opts.body);
+        const member = mdb.t.members.find((row) => row.user_id === p.p_user_id);
+        if (!member) return json(200, "unknown_user");
+        let receipt = mdb.t.revenuecat_events.find((row) => row.event_id === p.p_event_id);
+        const expiration = p.p_expiration_at_ms ? new Date(p.p_expiration_at_ms).toISOString() : null;
+        const ids = p.p_entitlement_ids || [];
+        if (receipt && (
+          receipt.user_id !== p.p_user_id || receipt.event_type !== p.p_event_type ||
+          receipt.event_timestamp_ms !== p.p_event_timestamp_ms ||
+          receipt.entitlement_ids.join(",") !== ids.join(",") ||
+          receipt.expiration_at !== expiration
+        )) return json(200, "event_id_conflict");
+        if (receipt && receipt.processed_at) return json(200, "duplicate");
+        if (!receipt) {
+          receipt = {
+            event_id: p.p_event_id, user_id: p.p_user_id, event_type: p.p_event_type,
+            event_timestamp_ms: p.p_event_timestamp_ms, entitlement_ids: [...ids],
+            expiration_at: expiration, processed_at: null,
+          };
+          mdb.t.revenuecat_events.push(receipt);
+        }
+        if (member.revenuecat_event_timestamp_ms != null && member.revenuecat_event_timestamp_ms >= p.p_event_timestamp_ms) {
+          Object.assign(receipt, { outcome: "stale", processed_at: new Date().toISOString() });
+          return json(200, "stale");
+        }
+        if (p.p_member_patch) {
+          if (Object.hasOwn(p.p_member_patch, "revenuecat_status")) member.revenuecat_status = p.p_member_patch.revenuecat_status;
+          if (Object.hasOwn(p.p_member_patch, "revenuecat_entitlement_until")) member.revenuecat_entitlement_until = p.p_member_patch.revenuecat_entitlement_until;
+          member.revenuecat_event_timestamp_ms = p.p_event_timestamp_ms;
+        }
+        Object.assign(receipt, { outcome: p.p_outcome, processed_at: new Date().toISOString() });
+        return json(200, p.p_outcome);
+      }
       const table = u.pathname.split("/").pop(); const rows = mdb.t[table];
       if (!rows) return json(404, { message: "no such table " + table });
       const filters = [...u.searchParams].filter(([k, v]) => v.startsWith("eq.")).map(([k, v]) => [k, decodeURIComponent(v.slice(3))]);

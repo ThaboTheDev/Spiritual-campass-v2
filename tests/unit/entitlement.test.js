@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { entitlement, addMonths } from "../../api/_lib/entitlement.js";
+import { entitlement, storeEntitlement, addMonths } from "../../api/_lib/entitlement.js";
 
 const now = new Date("2026-10-10T12:00:00Z");
 const day = 86400000;
@@ -34,3 +34,9 @@ test("addMonths clamps month ends", () => {
   assert.equal(addMonths(new Date("2026-12-15T09:00:00Z"), 1).toISOString(), "2027-01-15T09:00:00.000Z");
 });
 test("no member row → no access", () => assert.equal(entitlement(null).access, false));
+test("store cancellation permits access only before the exact expiration instant", () => {
+  const expires = new Date(now.getTime() + day).toISOString();
+  const member = { revenuecat_status: "cancelled", revenuecat_entitlement_until: expires };
+  assert.equal(storeEntitlement(member, { now }).access, true);
+  assert.equal(storeEntitlement(member, { now: new Date(expires) }).access, false);
+});
