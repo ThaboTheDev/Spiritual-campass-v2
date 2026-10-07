@@ -2,7 +2,7 @@
 import { allow, send } from "./_lib/http.js";
 import { cfg } from "./_lib/env.js";
 import { requireMember } from "./_lib/auth.js";
-import { entitlement } from "./_lib/entitlement.js";
+import { combineEntitlements, entitlement, storeEntitlement } from "./_lib/entitlement.js";
 
 export default async function handler(req, res) {
   if (!allow(req, res, ["GET"])) return;
@@ -10,7 +10,10 @@ export default async function handler(req, res) {
     const ctx = await requireMember(req, res); if (!ctx) return;
     const c = cfg(), m = ctx.member;
     // Admins always have access; everyone else follows trial / subscription rules.
-    const ent = m.is_admin ? { access: true, state: "admin" } : entitlement(m, { graceDays: c.graceDays });
+    const ent = m.is_admin ? { access: true, state: "admin" } : combineEntitlements(
+      entitlement(m, { graceDays: c.graceDays }),
+      storeEntitlement(m),
+    );
     send(res, 200, {
       email: ctx.user.email, status: m.status, ...ent,
       is_admin: m.is_admin === true,

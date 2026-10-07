@@ -45,6 +45,21 @@ export const db = {
   /* returns [] when this pf_payment_id was already recorded (PayFast can send the same ITN more than once) */
   async getPaymentByPfId(id) { return (await rest(`payments?pf_payment_id=eq.${q(id)}&select=*`))[0] || null; },
   async insertPayment(row) { return rest("payments?on_conflict=pf_payment_id", { method: "POST", body: row, prefer: "resolution=ignore-duplicates,return=representation" }); },
+  async processRevenueCatEvent(event, outcome, memberPatch) {
+    return rest("rpc/process_revenuecat_event", {
+      method: "POST",
+      body: {
+        p_event_id: event.id,
+        p_user_id: event.app_user_id,
+        p_event_type: event.type,
+        p_event_timestamp_ms: event.event_timestamp_ms,
+        p_entitlement_ids: event.entitlement_ids || [],
+        p_expiration_at_ms: event.expiration_at_ms || null,
+        p_outcome: outcome,
+        p_member_patch: memberPatch,
+      },
+    });
+  },
 };
 
 /* First visit after sign-up creates the member row and starts the free trial. */
