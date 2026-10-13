@@ -1,9 +1,36 @@
-// Business logic for PayFast notifications, separated from HTTP so it can be tested.
-import { itnParamString, itnSignatureValid, confirmWithPayfast, isPayfastIp } from "./payfast.js";
+// Business logic for PayFast notifications (ITN), separated from HTTP and from the
+// database so every rule below can be tested on its own.
+//
+// A notification changes access to the paid app, so nothing is believed until it
+// has passed all of these, in this order:
+//   1. a signature computed from the fields exactly as received, with the passphrase
+//   2. our merchant id
+//   3. the source address (advisory, or enforced with PAYFAST_ENFORCE_IP)
+//   4. PayFast's own server, asked to confirm the same fields
+//   5. the amount, against the price this member actually signed up at
+//   6. one pf_payment_id is applied once, even when PayFast retries
+//
+// The ports (db, confirm, checkIp, now, log) are injected, which is what makes the
+// whole flow testable without a network.
+
+import { itnParamString, itnSignatureValid, confirmWithPayfast, isPayfastIp } from "../integrations/payfast.js";
 import { addMonths } from "./entitlement.js";
+import { ITN_STORED_FIELDS } from "../config/policy.js";
+import { asNumber } from "./validate.js";
+
+const MAX_FIELDS = 60;                 // a PayFast notification has ~20 fields
+
+/* Keep only the fields the membership needs. The full notification also carries the
+   buyer's name, e-mail and address, none of which belongs in our database. */
+export function storedFields(data) {
+  const out = {};
+  for (const key of ITN_STORED_FIELDS) if (data[key] !== undefined) out[key] = String(data[key]).slice(0, 200);
+  return out;
+}
 
 export async function handleItn(raw, ip, { db, c, confirm = confirmWithPayfast, checkIp = isPayfastIp, now = () => new Date(), log = console }) {
   const pairs = [...new URLSearchParams(raw)];
+  if (!pairs.length || pairs.length > MAX_FIELDS) return { status: 400, reason: "malformed notification" };
   const data = Object.fromEntries(pairs);
   if (!data.signature) return { status: 400, reason: "missing signature" };
   if (!itnSignatureValid(pairs, c.passphrase)) return { status: 400, reason: "invalid signature" };
@@ -28,7 +55,8 @@ export async function handleItn(raw, ip, { db, c, confirm = confirmWithPayfast, 
     // A later price change therefore never breaks existing subscribers' renewals.
     const expected = checkout && checkout.amount != null ? Number(checkout.amount)
       : member && member.subscription_amount != null ? Number(member.subscription_amount) : Number(c.amount);
-    if (Math.abs(parseFloat(data.amount_gross) - expected) > 0.01) return { status: 400, reason: `amount mismatch (${data.amount_gross})` };
+    const paid = asNumber(data.amount_gross);
+    if (paid === null || Math.abs(paid - expected) > 0.01) return { status: 400, reason: `amount mismatch (${data.amount_gross})` };
 
     // Paid-through date this payment grants. Days left on a running free trial are kept, not thrown away.
     const prev = member && member.paid_through ? Date.parse(member.paid_through) : 0;
@@ -38,7 +66,8 @@ export async function handleItn(raw, ip, { db, c, confirm = confirmWithPayfast, 
 
     const inserted = await db.insertPayment({
       user_id: userId, pf_payment_id: data.pf_payment_id || null, m_payment_id: data.m_payment_id || null, token: data.token || null,
-      payment_status: status, amount_gross: data.amount_gross || null, amount_fee: data.amount_fee || null, amount_net: data.amount_net || null, raw: data,
+      payment_status: status, amount_gross: data.amount_gross || null, amount_fee: data.amount_fee || null, amount_net: data.amount_net || null,
+      raw: storedFields(data),
       applies_until: appliesUntil,
     });
     let duplicate = false;

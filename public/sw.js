@@ -1,5 +1,7 @@
 /* Service worker.
-   Bumped to v3: the membership layer moved from an e-mailed code to e-mail + password.
+   Bumped to v4: the pages carry no inline script any more (the CSP needs no
+   'unsafe-inline'), and the dashboard keeps its own two files, never cached.
+   Earlier: v3 moved the membership layer from an e-mailed code to e-mail + password.
    Rules that matter for sign-in:
      · /api/* , the Supabase auth calls and PayFast are NEVER cached - access is decided live;
      · /reset and /confirmed are never cached (they are one-use pages; they are not part of this
@@ -7,9 +9,10 @@
      · the app shell may be cached for offline use, but member.js runs its gate on every start,
        so a cached shell can never show the compass without the server (or a valid cached
        entitlement) saying the member has access. */
-const CACHE = "tshk-compass-sub-v3";
+const CACHE = "tshk-compass-sub-v4";
 const CORE = ["/", "/index.html", "/config.js", "/member.js", "/geo.js", "/lang.js", "/app.js", "/logo.png", "/manifest.webmanifest", "/icon-192.png", "/icon-512.png"];
-const NEVER = ["/reset", "/confirmed", "/reset.html", "/confirmed.html", "/dashboard.html"];
+const NEVER = ["/reset", "/confirmed", "/reset.html", "/confirmed.html",
+  "/dashboard.html", "/dashboard.js", "/dashboard-centres.js"];
 const neverCache = (url) =>
   url.pathname.startsWith("/api/") ||
   NEVER.indexOf(url.pathname) >= 0 ||

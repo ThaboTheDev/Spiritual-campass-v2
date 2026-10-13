@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { entitlement, storeEntitlement, addMonths } from "../../api/_lib/entitlement.js";
+import { entitlement, storeEntitlement, addMonths } from "../../api/_lib/domain/entitlement.js";
 
 const now = new Date("2026-10-10T12:00:00Z");
 const day = 86400000;

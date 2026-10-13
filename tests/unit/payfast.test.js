@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { phpUrlencode, checkoutSignature, buildSubscriptionCheckout, itnParamString, itnSignatureValid, apiHeaders, CHECKOUT_FIELD_ORDER } from "../../api/_lib/payfast.js";
+import { phpUrlencode, checkoutSignature, buildSubscriptionCheckout, itnParamString, itnSignatureValid, apiHeaders, CHECKOUT_FIELD_ORDER } from "../../api/_lib/integrations/payfast.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 let HAS_PHP = true; try { execFileSync("php", ["-v"], { stdio: "ignore" }); } catch { HAS_PHP = false; }

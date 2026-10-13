@@ -208,5 +208,75 @@ alter table public.members  add column if not exists revenuecat_status text;
 alter table public.members  add column if not exists revenuecat_entitlement_until timestamptz;
 alter table public.members  add column if not exists revenuecat_event_timestamp_ms bigint;
 
+-- ---------------------------------------------------------------------------
+-- Audit trail: the actions that change an account or money.
+--
+-- Everything identifying is stored as a short correlation hash (actor_hash,
+-- target_hash, ip_hash) and the detail object never carries an address, a
+-- password, a token or a card number, so this table cannot be read as a second
+-- copy of the membership list. Rows are never updated or deleted by the app:
+-- it only ever inserts.
+create table if not exists public.audit_log (
+  id            bigserial primary key,
+  at            timestamptz not null default now(),
+  action        text not null,
+  outcome       text not null default 'ok',
+  actor_user_id uuid,
+  actor_hash    text,
+  target_id     text,
+  target_hash   text,
+  ip_hash       text,
+  detail        jsonb
+);
+create index if not exists audit_log_at_idx on public.audit_log (at desc);
+alter table public.audit_log enable row level security;   -- no policies: service role only
+revoke all on public.audit_log from anon, authenticated;
+grant insert, select on public.audit_log to service_role;
+grant usage, select on sequence public.audit_log_id_seq to service_role;
+
+-- ---------------------------------------------------------------------------
+-- Rate-limit counters: one row per (route + caller) bucket, updated in place.
+-- "hits" is the count inside the current window and "window_ends" its end; the
+-- row is reset when the window has passed, so the table holds no history of
+-- who used the app when. Only the server counts against it.
+create table if not exists public.rate_limits (
+  bucket      text primary key,
+  hits        integer not null default 0,
+  window_ends timestamptz not null
+);
+alter table public.rate_limits enable row level security;  -- no policies: service role only
+revoke all on public.rate_limits from anon, authenticated;
+grant select, insert, update, delete on public.rate_limits to service_role;
+
+-- Increment a bucket and say how many hits it now holds and how long the caller
+-- should wait. One statement, so two serverless instances cannot lose a count.
+create or replace function public.consume_rate_limit(
+  p_bucket text,
+  p_window_seconds integer
+) returns table (hits integer, retry_after_seconds integer)
+language plpgsql
+set search_path = pg_catalog, public
+as $$
+declare
+  now_ts timestamptz := now();
+  span interval := make_interval(secs => greatest(1, least(coalesce(p_window_seconds, 60), 86400)));
+begin
+  insert into public.rate_limits (bucket, hits, window_ends)
+  values (p_bucket, 1, now_ts + span)
+  on conflict (bucket) do update set
+    hits = case when public.rate_limits.window_ends <= now_ts then 1 else public.rate_limits.hits + 1 end,
+    window_ends = case when public.rate_limits.window_ends <= now_ts then now_ts + span else public.rate_limits.window_ends end
+  returning
+    public.rate_limits.hits,
+    greatest(1, ceil(extract(epoch from (public.rate_limits.window_ends - now_ts)))::int);
+end;
+$$;
+revoke all on function public.consume_rate_limit(text, integer) from public, anon, authenticated;
+grant execute on function public.consume_rate_limit(text, integer) to service_role;
+
+-- The overview view is for the SQL editor only; run it with the reader's own
+-- rights so a future grant cannot turn it into an escalation path.
+alter view public.member_overview set (security_invoker = true);
+
 -- Make yourself the first admin AFTER you have signed in to the app once (this creates your member row):
 --   update public.members set is_admin = true where lower(email) = lower('you@example.org');

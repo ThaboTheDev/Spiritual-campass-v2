@@ -1,8 +1,13 @@
-// Password rules and the admin "auto-generate password" helper. No dependencies.
+// Password rules and the admin "auto-generate password" helper. Pure, no I/O.
+//
+// The rules match what the app tells the member (three bullet points) and what
+// Supabase Auth is configured with (minimum length 8). Password bytes are capped at
+// 72 because bcrypt — which Supabase uses — ignores anything beyond that.
+
 import crypto from "node:crypto";
 
 export const PASSWORD_MIN = 8;
-export const PASSWORD_MAX = 72; // bcrypt (used by Supabase Auth) ignores anything beyond 72 bytes
+export const PASSWORD_MAX = 72;
 
 /* Returns null when the password is acceptable, otherwise an error code the app turns into a message. */
 export function passwordProblem(pw) {
@@ -29,5 +34,3 @@ export function generatePassword(length = 12) {
   }
   return chars.join("");
 }
-
-export const isUuid = (v) => typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);

@@ -26,7 +26,7 @@ const trial = (over = {}) => Object.assign({
   access_until: new Date(Date.now() + 7 * 864e5).toISOString(), is_admin: false,
   must_change_password: false, can_cancel: false, price: "100.00", currency: "ZAR", trial_days: 7
 }, over);
-/* Exactly what GET /api/centres returns: api/_lib/centres.js publicCentre() sends the long keys for
+/* Exactly what GET /api/centres returns: api/_lib/domain/centres.js publicCentre() sends the long keys for
    the admin area AND the short ones app.js renders from. A fixture with only one set lies. */
 const centre = (id, name, region, address, town, phone, lat, lng) => ({
   id, name, region, address, town, phone, lat, lng, verified: true,
@@ -1115,7 +1115,7 @@ test("the web app manifest is installable and its icons really exist", async () 
 });
 
 /* The paywall title branches on the entitlement state. The suite covered "grace", which
-   api/_lib/entitlement.js never returns, and missed the two it does. These are the states
+   api/_lib/domain/entitlement.js never returns, and missed the two it does. These are the states
    a member whose payment actually failed will see. */
 test("past_due: the paywall says this month's payment was not received", async () => {
   const b = await boot({ me: trial({ status: "active", state: "past_due", access: false, access_until: undefined, days_left: undefined }) });
@@ -1155,7 +1155,7 @@ test("cancelled: access continues to the end of the paid month, and the member i
   b.close();
 });
 
-/* state:"none" is what api/_lib/entitlement.js returns when there is no row in
+/* state:"none" is what api/_lib/domain/entitlement.js returns when there is no row in
    `members` at all — an account created in the Supabase dashboard, or a sign-up
    whose members-row insert failed. Such a member has never had a trial, so
    blaming the trial on them is a lie; the wording has to say there is simply no

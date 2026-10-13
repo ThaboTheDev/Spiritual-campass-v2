@@ -31,7 +31,7 @@ RevenueCat ─ webhook POST ──────────────► webhoo
 member.js ── POST /api/payfast/cancel ─► cancel.js: PayFast Subscriptions API cancel
 ```
 
-Access decisions are made on the server (`api/_lib/entitlement.js`). The centre list (names, addresses, phone numbers) is only
+Access decisions are made on the server (`api/_lib/domain/entitlement.js`). The centre list (names, addresses, phone numbers) is only
 served to members with access. The compass maths runs on the phone like any web app; the overlay stops normal use, but a
 determined technical person could bypass a client-side screen. If stronger protection is needed later, more features can be
 moved behind the API in the same way as the centres.
@@ -43,8 +43,12 @@ public/                  Everything served to phones (Vercel "outputDirectory")
   index.html             App + membership overlay and account chip
   config.js              Public settings: Supabase URL + anon key, price label, STORE_BUILD flag
   member.js              Sign-in, trial, paywall, PayFast hand-off, account/cancel, offline grace
-  app.js, geo.js, lang.js, dashboard.html, sw.js, manifest.webmanifest, icons
-api/
+  app.js, geo.js, lang.js, sw-register.js     the app's scripts (no inline script anywhere)
+  privacy.html           Privacy Policy (African Hidden Voices): self-contained page, its own CSP
+  dashboard.html, dashboard.js, dashboard-centres.js   members-only centres dashboard
+  sw.js, manifest.webmanifest, icons
+api/                     one file per endpoint; every one is a thin controller
+
   me.js                  GET  → member access (starts the trial on first call)
   centres.js             GET  → centre list (members with access only)
   payfast/checkout.js    POST → signed PayFast subscription form
@@ -56,7 +60,14 @@ api/
   admin/reset-password.js     POST → set a temporary password, returned once, forced change at next sign-in
   admin/delete-user.js   POST → cancel the subscription first, then delete the account
   admin/centres.js       GET/POST/PATCH/DELETE → centre directory (admins only)
-  _lib/                  env, http, supabase, entitlement, payfast signing/verification, ITN logic, centres data (not routes)
+  _lib/                  everything that is not a route, in layers (imports only go downwards):
+    config/              env.js reads every setting once; policy.js holds the fixed limits
+    http/                route.js is the one controller wrapper; request/response/error shaping
+    security/            headers and CSP, origin checks, rate limiting, webhook auth, audit trail
+    services/            what each endpoint does, in terms of rules and stored data
+    domain/              pure rules: entitlement, validation, centres, passwords, ITN, RevenueCat
+    data/                Supabase REST/RPC access - one module per table, write allowlists
+    integrations/        PayFast signing, validation and the Subscriptions API
 supabase/schema.sql      Tables, security policies, admin view
 supabase/seed_centres.sql     The 88 centres (no rows are inserted by the schema)
 vercel.json              Output directory public/, Node runtime
@@ -107,12 +118,14 @@ No npm packages are needed at runtime: the functions use Node 18+ built-ins (`fe
 - `PAYFAST_SANDBOX=false` with the live Merchant ID/Key/passphrase; redeploy.
 - Do one real R100 payment with a staff card, check the ITN in the logs, then cancel it.
 - Optional: `PAYFAST_ENFORCE_IP=true` after confirming in the logs that no "unrecognised address" warnings appear for real ITNs.
-- Publish a privacy policy (POPIA): what is kept (email, membership dates, PayFast payment references; no card details ever touch
-  this system), why, for how long, and who the Information Officer is. Deleting a user in Supabase Auth removes their member row.
+- The privacy policy ships with the app at `/privacy` (`public/privacy.html`, African Hidden Voices). It covers what is kept
+  (e-mail address, membership dates, PayFast payment references; no card details ever touch this system), why, for how long, and
+  who to contact (info@africanhiddenvoices.co.za). Deleting a user in Supabase Auth removes their member row. It is published
+  with its own CSP (`frame-ancestors` allowing the africanhiddenvoices.co.za site) so it can also be embedded there.
 - Tell members how to cancel (Account screen, or the link in PayFast's emails).
 
 ## PayFast security in this code
-Every notification (`api/_lib/itn.js`) must pass all of these before anything changes:
+Every notification (`api/_lib/domain/itn.js`) must pass all of these before anything changes:
 1. **Signature** recomputed from the fields exactly as received, with the secret passphrase (PHP-urlencode rules, MD5).
 2. **Merchant ID** matches ours.
 3. **Source address** belongs to PayFast (logged; enforced when `PAYFAST_ENFORCE_IP=true`).
@@ -121,6 +134,47 @@ Every notification (`api/_lib/itn.js`) must pass all of these before anything ch
 6. **Idempotency**: each `pf_payment_id` is applied once (PayFast may resend notifications).
 The passphrase and service role key never reach the browser. Tests prove the checkout, ITN and API signatures are byte-for-byte
 the same as PayFast's PHP reference code (`tests/unit/php-reference.php`).
+
+## Security measures in this code
+
+**Every response is served with a policy, not a promise.** `vercel.json` carries the same strings the code exports
+(`api/_lib/security/headers.js`), so a header cannot drift from the constant the tests check:
+
+- **Content-Security-Policy** — `default-src 'self'`, `object-src 'none'`, `base-uri 'none'`, `frame-ancestors 'none'`,
+  `form-action` limited to this site and PayFast. Scripts are same-origin plus Leaflet/d3/topojson from cdnjs, jsdelivr and unpkg.
+  The pages carry **no inline `<script>` and no inline event handler**, so `script-src` has no `'unsafe-inline'` and no `'unsafe-eval'`
+  (only styles are inline). `public/privacy.html` is served with `frame-ancestors` allowing `africanhiddenvoices.co.za`, so it can be
+  embedded in the main site, and nothing else.
+- **Strict-Transport-Security** `max-age=63072000; includeSubDomains; preload`, plus `X-Content-Type-Options: nosniff`,
+  `Referrer-Policy`, Cross-Origin-Opener/Resource-Policy and a `Permissions-Policy` that allows only the sensors the compass needs.
+  API answers add `Cache-Control: no-store` and `X-Frame-Options: DENY`.
+- **Every API answer is JSON of the shape `{ "error": "code" }`** or the endpoint's own body; internals and stack traces go to the
+  logs only (`http/errors.js`, `http/route.js`).
+
+**Every request passes the same seven steps** (`api/_lib/http/route.js`): method allowlist → same-origin check → rate limit →
+authentication → size-capped body read → the handler → error mapping.
+
+- **Origin check** (`security/origin.js`): a browser request must come from this site or `ALLOWED_ORIGINS`; no CORS header is ever
+  sent, so no other origin can read a reply. Server-to-server callers (PayFast, RevenueCat) send no `Origin` and are allowed.
+- **Rate limits** (`security/rate-limit.js`, per route in `config/policy.js`): memory by default, or the shared
+  `rate_limits` table and `consume_rate_limit()` function when `RATE_LIMIT_BACKEND=supabase`, so several serverless instances share
+  one count. The limiter fails open if its store is down - a guard, not the gate - and webhooks are never limited.
+- **Bodies**: `application/json` only for JSON endpoints (a cross-site form or `text/plain` POST is refused), 16 KiB for JSON,
+  64 KiB for PayFast/RevenueCat, parsed only after the size check.
+- **Authentication** (`services/access.js`): the Supabase token is verified against Supabase on **every** call, the member row is
+  created from it if missing, and `is_admin` / `must_change_password` are read from the database - never from the client. The PayFast
+  token never leaves the server (`/api/me` and the admin list both exclude it).
+
+**What is stored is what is needed.** Each table has a write allow-list in `api/_lib/data/`, so `is_admin` and friends can never be
+written by the API; the ITN receipt keeps only an allowlist of PayFast fields (`ITN_STORED_FIELDS`) and drops the buyer's name,
+e-mail and phone number; every table has Row Level Security enabled and the server-only ones have no policies at all. The audit trail
+(`audit_log`) records who did what to whose account, with the actor, target and IP stored as short salted hashes, and details that
+never include an address, password or token. Webhook secrets are compared in constant time (`security/webhook-auth.js`), and the
+service-role key, PayFast passphrase and RevenueCat secret exist only in Vercel's environment variables - `public/` holds nothing
+but the publishable anon key.
+
+`tests/unit/security.test.js` pins all of the above: the deployed CSP equals the code's constant, no page has an inline script, no
+route writes its own response, no secret string appears anywhere under `public/`, and the limiter counts per route and caller.
 
 ## App stores and payments (important)
 Selling a digital subscription **inside** a store app normally requires the store's own billing:
@@ -172,8 +226,9 @@ npm run test:e2e              # the same membership flows in a real browser, bac
 
 `.github/workflows/tests.yml` runs both on every push and pull request to `main`, on Ubuntu with
 Node 22, PHP 8.2 and Chromium — so the PayFast signature comparisons run rather than skip, and the
-browser suite really executes. The last run reported **103 unit/API tests passing (0 skipped)** and
-**88 browser assertions passing**. Node 22 is deliberate: jsdom 30 declares
+browser suite really executes. The unit suite grew with the security work: it now covers entitlement,
+the PayFast signatures and the ITN rules, the RevenueCat lifecycle, the full API cycle, the
+`.env.example` contract and the security promises above. Node 22 is deliberate: jsdom 30 declares
 `engines: ^22.22.2 || ^24.15.0 || >=26`, and since npm does not enforce `engines`, Node 20 installs
 cleanly and then fails at import time.
 
@@ -193,7 +248,7 @@ never locks out existing subscribers; only new sign-ups pay the new price.
 - **Retry-safe activation:** each payment records the paid-through date it grants (`payments.applies_until`). If the database write that
   activates a member fails, PayFast's retry completes it instead of being ignored as a duplicate.
 - **Free-trial days are kept:** subscribing on day 2 of a 7-day trial gives one month *after* the trial ends, not a month from today.
-  To go back to "a month from the payment date", remove `trialEnd` from the `Math.max(...)` in `api/_lib/itn.js`.
+  To go back to "a month from the payment date", remove `trialEnd` from the `Math.max(...)` in `api/_lib/domain/itn.js`.
 - **Upgrading an existing database:** run the two `alter table ... add column if not exists` lines at the bottom of `supabase/schema.sql`.
 
 ## Password sign-in, admin area and centres in the database

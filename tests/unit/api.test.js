@@ -12,7 +12,7 @@ const centres = (await import("../../api/centres.js")).default;
 const checkout = (await import("../../api/payfast/checkout.js")).default;
 const notify = (await import("../../api/payfast/notify.js")).default;
 const cancel = (await import("../../api/payfast/cancel.js")).default;
-const { checkoutSignature } = await import("../../api/_lib/payfast.js");
+const { checkoutSignature } = await import("../../api/_lib/integrations/payfast.js");
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 let HAS_PHP = true; try { execFileSync("php", ["-v"], { stdio: "ignore" }); } catch { HAS_PHP = false; }

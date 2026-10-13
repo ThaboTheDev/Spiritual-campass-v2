@@ -56,13 +56,20 @@ const serve = () => new Promise((res) => {
   });
   s.listen(0, () => res({ url: `http://localhost:${s.address().port}`, close: () => s.close() }));
 });
-const { REGIONS, CENTRES } = (() => { const src = fs.readFileSync(path.join(__dirname, "..", "..", "api", "_lib", "centres-data.js"), "utf8").replace(/export const /g, "const "); return new Function(src + ";return {REGIONS,CENTRES};")(); })();
+/* Read the shipped modules as plain source for this CommonJS harness: drop the import
+   lines, paste a module's own local imports in first (in dependency order), and strip the
+   "export " keyword. The e2e run therefore exercises the real helpers, not a copy. */
+const sourceOf = (...files) => files
+  .map((f) => fs.readFileSync(path.join(__dirname, "..", "..", "api", "_lib", f), "utf8"))
+  .join("\n")
+  .replace(/^import .*$/gm, "")
+  .replace(/^export /gm, "");
+const { REGIONS, CENTRES } = (() => { const src = sourceOf("data/centres-catalogue.js"); return new Function(src + ";return {REGIONS,CENTRES};")(); })();
 /* Serve the centres through the real publicCentre(): it sends the long keys the admin area
    reads AND the short ones app.js renders from. Feeding it the bare seed rows left every
    centre with region === undefined, so the admin list collapsed into a single group. */
 const { publicCentre } = (() => {
-  const src = fs.readFileSync(path.join(__dirname, "..", "..", "api", "_lib", "centres.js"), "utf8")
-    .replace(/export function /g, "function ").replace(/export const /g, "const ");
+  const src = sourceOf("domain/validate.js", "domain/centres.js");
   return new Function(src + ";return {publicCentre};")();
 })();
 const ROWS = CENTRES.map((c, i) => publicCentre({
