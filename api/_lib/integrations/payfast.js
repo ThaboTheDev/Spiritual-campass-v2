@@ -84,13 +84,20 @@ export function itnSignatureValid(pairs, passphrase) {
   return safeEqual(md5(s), sig);
 }
 
-/* Ask PayFast to confirm the notification is genuine (response body "VALID"). */
-export async function confirmWithPayfast(paramString, sandbox, fetchImpl = fetch) {
-  const r = await fetchImpl(sandbox ? VALIDATE_URL.sandbox : VALIDATE_URL.live, {
-    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: paramString,
-  });
-  const text = (await r.text()).trim();
-  return r.ok && text === "VALID";
+/* Ask PayFast to confirm the notification is genuine (response body "VALID").
+   A hung confirmation is treated as "not confirmed": PayFast retries later, and an
+   unconfirmed notification must never activate a membership. */
+export async function confirmWithPayfast(paramString, sandbox, fetchImpl = fetch, timeoutMs = 15000) {
+  const controller = typeof AbortController === "function" ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  try {
+    const r = await fetchImpl(sandbox ? VALIDATE_URL.sandbox : VALIDATE_URL.live, {
+      method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: paramString,
+      signal: controller ? controller.signal : undefined,
+    });
+    const text = (await r.text()).trim();
+    return r.ok && text === "VALID";
+  } catch { return false; } finally { if (timer) clearTimeout(timer); }
 }
 
 /* Source check: resolve PayFast's hostnames, or reverse-lookup the caller. Advisory unless PAYFAST_ENFORCE_IP=true. */
@@ -115,9 +122,15 @@ export function apiHeaders(c, body = {}, now = new Date()) {
   const s = Object.keys(all).sort().map((k) => `${k}=${phpUrlencode(String(all[k]).trim())}`).join("&");
   return { ...headers, signature: md5(s) };
 }
-export async function subscriptionAction(c, token, action, { method = "PUT", fetchImpl = fetch } = {}) {
+export async function subscriptionAction(c, token, action, { method = "PUT", fetchImpl = fetch, timeoutMs = 15000 } = {}) {
   const url = `${API_BASE}/subscriptions/${encodeURIComponent(token)}/${action}${c.sandbox ? "?testing=true" : ""}`;
-  const r = await fetchImpl(url, { method, headers: { ...apiHeaders(c), "Content-Type": "application/json" } });
-  let data = null; try { data = await r.json(); } catch { /* empty body */ }
-  return { ok: r.ok, status: r.status, data };
+  const controller = typeof AbortController === "function" ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  try {
+    const r = await fetchImpl(url, { method, headers: { ...apiHeaders(c), "Content-Type": "application/json" }, signal: controller ? controller.signal : undefined });
+    let data = null; try { data = await r.json(); } catch { /* empty body */ }
+    return { ok: r.ok, status: r.status, data };
+  } catch (e) {
+    return { ok: false, status: 0, data: { error: e.name || "network_error" } };
+  } finally { if (timer) clearTimeout(timer); }
 }

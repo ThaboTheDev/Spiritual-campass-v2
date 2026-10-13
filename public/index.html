@@ -477,6 +477,7 @@ body.locked .app,body.locked .tabs{visibility:hidden}
         <input id="m-up-pw2" type="password" autocomplete="new-password" required>
         <button class="btn primary" id="m-up-go" type="submit">Create my account</button>
         <p class="m-fine" id="m-up-fine"></p>
+        <p class="m-fine" id="m-up-privacy"><span id="m-up-privacy-t"></span> <a id="m-up-privacy-l" href="/privacy" target="_blank" rel="noopener">Privacy policy</a>.</p>
       </form>
     </div>
 
@@ -566,7 +567,7 @@ body.locked .app,body.locked .tabs{visibility:hidden}
 
     <button class="btn quiet" id="m-retry" type="button" hidden>Try again</button>
     <p class="m-msg" id="m-msg" role="status" aria-live="polite"></p>
-    <div class="m-foot"><button class="linkbtn" id="m-signout" type="button" hidden>Sign out</button><button class="linkbtn" id="m-close" type="button" hidden>Close</button></div>
+    <div class="m-foot"><a class="linkbtn" id="m-privacy" href="/privacy" target="_blank" rel="noopener">Privacy policy</a><button class="linkbtn" id="m-signout" type="button" hidden>Sign out</button><button class="linkbtn" id="m-close" type="button" hidden>Close</button></div>
   </div>
 </div>
 
@@ -597,8 +598,6 @@ body.locked .app,body.locked .tabs{visibility:hidden}
 <script src="lang.js"></script>
 <script src="app.js"></script>
 
-<script>
-if("serviceWorker" in navigator){window.addEventListener("load",()=>{navigator.serviceWorker.register("/sw.js").catch(()=>{});});}
-</script>
+<script src="sw-register.js" defer></script>
 </body>
 </html>

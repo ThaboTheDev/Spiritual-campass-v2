@@ -12,7 +12,7 @@ export function setEnv(extra = {}) {
 }
 
 export function memoryDb() {
-  const t = { members: [], checkouts: [], payments: [], centres: [], revenuecat_events: [] };
+  const t = { members: [], checkouts: [], payments: [], centres: [], revenuecat_events: [], audit_log: [], rate_limits: [] };
   const credentials = {};   // email -> password (stand-in for Supabase Auth)
   const passwordLog = [];   // every admin password set: [{ id, password }]
   const deletedUsers = [];
@@ -57,6 +57,19 @@ export function installFetch(mdb, { users = { "good-token": { id: "u1", email: "
       }
     }
     if (u.host === "sb.test" && u.pathname.startsWith("/rest/v1/")) {
+      if (u.pathname === "/rest/v1/rpc/consume_rate_limit") {
+        const p = JSON.parse(opts.body);
+        const row = mdb.t.rate_limits.find((r) => r.bucket === p.p_bucket);
+        const windowSeconds = Math.max(1, Number(p.p_window_seconds) || 60);
+        const now = Date.now();
+        if (!row || row.resetAt <= now) {
+          if (row) Object.assign(row, { hits: 1, resetAt: now + windowSeconds * 1000 });
+          else mdb.t.rate_limits.push({ bucket: p.p_bucket, hits: 1, resetAt: now + windowSeconds * 1000 });
+          return json(200, [{ hits: 1, retry_after_seconds: windowSeconds }]);
+        }
+        row.hits += 1;
+        return json(200, [{ hits: row.hits, retry_after_seconds: Math.max(1, Math.ceil((row.resetAt - now) / 1000)) }]);
+      }
       if (u.pathname === "/rest/v1/rpc/process_revenuecat_event") {
         if (mdb.rpcFailures > 0) {
           mdb.rpcFailures -= 1;

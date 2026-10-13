@@ -11,7 +11,7 @@ const adminUsers = (await import("../../api/admin/users.js")).default;
 const resetPassword = (await import("../../api/admin/reset-password.js")).default;
 const deleteUser = (await import("../../api/admin/delete-user.js")).default;
 const adminCentres = (await import("../../api/admin/centres.js")).default;
-const { generatePassword, passwordProblem } = await import("../../api/_lib/passwords.js");
+const { generatePassword, passwordProblem } = await import("../../api/_lib/domain/passwords.js");
 
 const ADMIN = "a1111111-1111-4111-8111-111111111111", U2 = "b2222222-2222-4222-8222-222222222222", U3 = "c3333333-3333-4333-8333-333333333333", ADMIN2 = "d4444444-4444-4444-8444-444444444444";
 const users = {

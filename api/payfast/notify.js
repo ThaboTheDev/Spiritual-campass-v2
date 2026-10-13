@@ -1,18 +1,24 @@
-// POST /api/payfast/notify → PayFast ITN (called by PayFast for the first payment, every monthly payment, and cancellations)
-import { readRaw, clientIp } from "../_lib/http.js";
-import { cfg } from "../_lib/env.js";
-import { db } from "../_lib/supabase.js";
-import { handleItn } from "../_lib/itn.js";
+// POST /api/payfast/notify → PayFast's ITN (the first payment, every monthly
+// payment, and cancellations).
+//
+// PayFast is a machine, not a browser: there is no bearer token here, and no origin
+// check to make (the sender is a server). The gate is the signature plus PayFast's
+// own confirmation, both verified in _lib/domain/itn.js before anything changes.
+//
+// The reply body is plain text: PayFast reads it as a word, and a non-2xx answer
+// makes PayFast retry later.
 
-export default async function handler(req, res) {
-  if (req.method !== "POST") { res.statusCode = 405; return res.end(); }
-  try {
-    const raw = await readRaw(req);                  // must be read before anything touches req.body
-    const result = await handleItn(raw, clientIp(req), { db, c: cfg() });
-    console.log(`[payfast] ITN → ${result.status} ${result.reason}`);
-    res.statusCode = result.status; res.end(result.reason);
-  } catch (e) {
-    console.error("[payfast] ITN error", e);
-    res.statusCode = 500; res.end("error");          // non-200 makes PayFast retry later
-  }
-}
+import { defineRoute } from "../_lib/http/route.js";
+import { clientIp } from "../_lib/http/request.js";
+import { processPayfastItn } from "../_lib/services/webhooks.js";
+
+export default defineRoute({
+  name: "webhooks.itn",
+  methods: ["POST"],
+  auth: "none",
+  body: "form",                     // raw, capped at 64 KiB; the signature needs the exact bytes
+  handler: async ({ req, payload }) => {
+    const result = await processPayfastItn(payload, clientIp(req));
+    return { status: result.status, text: result.reason };
+  },
+});

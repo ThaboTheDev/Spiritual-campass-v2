@@ -1,25 +1,18 @@
-// GET /api/admin/users?q=part-of-email → members for the admin list (admins only)
-import { allow, send } from "../_lib/http.js";
-import { cfg } from "../_lib/env.js";
-import { requireAdmin } from "../_lib/auth.js";
-import { db } from "../_lib/supabase.js";
-import { entitlement } from "../_lib/entitlement.js";
+// GET /api/admin/users?q=part-of-email → the member list (admins only).
+//
+// The admin gate is the route's auth level: signed in, password already changed,
+// and is_admin true in the database — checked on every call, never from the app.
 
-export default async function handler(req, res) {
-  if (!allow(req, res, ["GET"])) return;
-  try {
-    const ctx = await requireAdmin(req, res); if (!ctx) return;
-    const q = new URL(req.url || "/", "http://x").searchParams.get("q") || "";
-    const c = cfg();
-    const rows = await db.listMembers(q);
-    send(res, 200, {
-      users: rows.map((m) => ({
-        user_id: m.user_id, email: m.email, status: m.status, created_at: m.created_at,
-        trial_ends_at: m.trial_ends_at, paid_through: m.paid_through,
-        is_admin: m.is_admin === true, must_change_password: m.must_change_password === true,
-        state: m.is_admin ? "admin" : entitlement(m, { graceDays: c.graceDays }).state,
-        has_subscription: m.status === "active" && !!m.payfast_token, is_you: m.user_id === ctx.user.id,
-      })),
-    });
-  } catch (e) { console.error(e); send(res, e.status || 500, { error: "server_error" }); }
-}
+import { defineRoute } from "../_lib/http/route.js";
+import { listUsers } from "../_lib/services/admin.js";
+import { asSearchTerm } from "../_lib/domain/validate.js";
+
+export default defineRoute({
+  name: "admin.users",
+  methods: ["GET"],
+  auth: "admin",
+  handler: async ({ req, ctx }) => {
+    const search = new URL(req.url || "/", "http://admin").searchParams.get("q") || "";
+    return { status: 200, body: { users: await listUsers(ctx, asSearchTerm(search)) } };
+  },
+});

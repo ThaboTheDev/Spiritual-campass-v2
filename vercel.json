@@ -5,10 +5,25 @@
     {"source": "/sw.js", "headers": [{"key": "Cache-Control", "value": "no-cache"}]},
     {"source": "/index.html", "headers": [{"key": "Cache-Control", "value": "no-cache"}]},
     {"source": "/api/(.*)", "headers": [{"key": "Cache-Control", "value": "no-store"}]},
+
     {"source": "/(.*)", "headers": [
-      {"key": "Permissions-Policy", "value": "geolocation=(self), accelerometer=(self), gyroscope=(self), magnetometer=(self)"},
+      {"key": "Content-Security-Policy", "value": "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self' https://www.payfast.co.za https://sandbox.payfast.co.za; script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https://tile.openstreetmap.org https://*.tile.openstreetmap.org; connect-src 'self' https://*.supabase.co https://cdn.jsdelivr.net; worker-src 'self'; manifest-src 'self'; upgrade-insecure-requests"},
+      {"key": "Strict-Transport-Security", "value": "max-age=63072000; includeSubDomains; preload"},
+      {"key": "X-Frame-Options", "value": "DENY"},
       {"key": "X-Content-Type-Options", "value": "nosniff"},
-      {"key": "Referrer-Policy", "value": "strict-origin-when-cross-origin"}
+      {"key": "Referrer-Policy", "value": "strict-origin-when-cross-origin"},
+      {"key": "Cross-Origin-Opener-Policy", "value": "same-origin"},
+      {"key": "Cross-Origin-Resource-Policy", "value": "same-origin"},
+      {"key": "Permissions-Policy", "value": "accelerometer=(self), geolocation=(self), gyroscope=(self), magnetometer=(self), camera=(), microphone=(), payment=(), usb=()"}
+    ]},
+
+    {"source": "/privacy", "headers": [
+      {"key": "Content-Security-Policy", "value": "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self' https://africanhiddenvoices.co.za https://www.africanhiddenvoices.co.za; form-action 'self' https://www.payfast.co.za https://sandbox.payfast.co.za; script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https://tile.openstreetmap.org https://*.tile.openstreetmap.org; connect-src 'self' https://*.supabase.co https://cdn.jsdelivr.net; worker-src 'self'; manifest-src 'self'; upgrade-insecure-requests"},
+      {"key": "X-Frame-Options", "value": "SAMEORIGIN"}
+    ]},
+    {"source": "/privacy.html", "headers": [
+      {"key": "Content-Security-Policy", "value": "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self' https://africanhiddenvoices.co.za https://www.africanhiddenvoices.co.za; form-action 'self' https://www.payfast.co.za https://sandbox.payfast.co.za; script-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https://tile.openstreetmap.org https://*.tile.openstreetmap.org; connect-src 'self' https://*.supabase.co https://cdn.jsdelivr.net; worker-src 'self'; manifest-src 'self'; upgrade-insecure-requests"},
+      {"key": "X-Frame-Options", "value": "SAMEORIGIN"}
     ]}
   ]
 }

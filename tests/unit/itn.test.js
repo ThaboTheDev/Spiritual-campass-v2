@@ -4,8 +4,8 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import crypto from "node:crypto";
-import { handleItn } from "../../api/_lib/itn.js";
-import { phpUrlencode } from "../../api/_lib/payfast.js";
+import { handleItn } from "../../api/_lib/domain/itn.js";
+import { phpUrlencode } from "../../api/_lib/integrations/payfast.js";
 import { memoryDb } from "./helpers.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));

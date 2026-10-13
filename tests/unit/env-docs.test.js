@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const envSrc = fs.readFileSync(path.join(ROOT, "api/_lib/env.js"), "utf8");
+const envSrc = fs.readFileSync(path.join(ROOT, "api/_lib/config/env.js"), "utf8");
 const doc = fs.readFileSync(path.join(ROOT, ".env.example"), "utf8");
 
 /* The API reads its settings through env("NAME") / env("NAME", "default").
@@ -54,7 +54,7 @@ test("each documented default is the default the code actually uses", () => {
   for (const c of truth.filter((c) => c.hasDefault)) {
     const m = commentsAbove(c.name).match(/default "([^"]*)"/);
     assert.ok(m, c.name + " should state its default");
-    assert.equal(m[1], c.def, c.name + ": documented default differs from api/_lib/env.js");
+    assert.equal(m[1], c.def, c.name + ": documented default differs from api/_lib/config/env.js");
   }
 });
 
