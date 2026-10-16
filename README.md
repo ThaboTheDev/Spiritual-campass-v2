@@ -70,7 +70,9 @@ api/                     one file per endpoint; every one is a thin controller
     integrations/        PayFast signing, validation and the Subscriptions API
 supabase/schema.sql      Tables, security policies, admin view
 supabase/seed_centres.sql     The 88 centres (no rows are inserted by the schema)
-vercel.json              Output directory public/, Node runtime
+vercel.json              Output directory public/, Node runtime, and the deployed header blocks
+                         (its three Content-Security-Policy values are generated - see scripts/)
+scripts/sync-csp.mjs     npm run sync:csp - copies the CSP constants into vercel.json
 tests/unit/              API tests (signatures vs the PayFast PHP reference, ITN rules, entitlement,
                          full API cycle) plus membership.test.js, which runs the real public/ files
                          in jsdom against a mocked Supabase and /api/*
@@ -124,6 +126,63 @@ No npm packages are needed at runtime: the functions use Node 18+ built-ins (`fe
   with its own CSP (`frame-ancestors` allowing the africanhiddenvoices.co.za site) so it can also be embedded there.
 - Tell members how to cancel (Account screen, or the link in PayFast's emails).
 
+## Copying this app to another repo, account or domain
+
+The app is a static `public/` folder plus the Node functions in `api/`, so a second copy is a new Vercel project and (usually) a
+new Supabase project. Nothing in the code knows which account it is running on — **everything it needs comes from the
+environment** — so a copy that misbehaves is almost always one of the settings below. Do them in this order.
+
+1. **Environment variables: every one of them, for Production *and* Preview.** Copy each line of `.env.example` into the new
+   project's **Settings → Environment Variables** and tick **both** scopes: a variable set for Production only is missing on every
+   `*-git-*.vercel.app` and `*.vercel.app` preview URL. Vercel reads them at deploy time, so **redeploy** after adding or changing
+   one. A variable that is missing or mistyped does not fail as a 500 — every endpoint answers
+   `503 {"error":"server_misconfigured"}` and the Vercel log line for that request **names the variable**, so read the log first.
+2. **Database: run `supabase/schema.sql` on that project's database** (Supabase → SQL Editor), then `supabase/seed_centres.sql`
+   for the 88 centres. The schema is safe to run again, and it has to create `audit_log` and `rate_limits` **plus the
+   `consume_rate_limit()` function** alongside `members`, `checkouts`, `payments`, `centres` and `revenuecat_events` — a database
+   assembled by hand tends to lose the bottom of that file, which silently costs the audit trail and the shared rate limiter.
+   Also in that project: **Authentication → Providers → Email** enabled, **Confirm email OFF**, minimum password length 8, and
+   **Project Settings → Auth → SMTP** left empty (the app sends no e-mail).
+3. **`public/config.js`: that project's Supabase URL and `anon` key.** This file is published to every visitor, so it carries the
+   URL and the anon key only — the **`service_role` key stays in Vercel's environment variables** (`SUPABASE_SERVICE_ROLE_KEY`)
+   and nowhere else. `tests/unit/security.test.js` fails the build if a secret string appears anywhere under `public/`.
+4. **`SITE_URL` = the deployment's own address** (`https://`, no trailing slash): PayFast builds the buyer's return URL and the
+   ITN URL from it. Calls from the *other* addresses the same deployment answers on (a fresh `*.vercel.app` domain, a preview URL)
+   are accepted automatically, because the origin check compares the request's `Origin` with the `Host` it was addressed to.
+   Anything genuinely elsewhere — a separate staging domain, the marketing site calling this API — goes in **`ALLOWED_ORIGINS`**
+   as a comma-separated list of bare origins.
+5. **Payments and webhooks belong to the new account:** that account's PayFast Merchant ID / Merchant Key / passphrase
+   (`PAYFAST_SANDBOX=true` while testing), the ITN address `https://YOUR-DOMAIN/api/payfast/notify`, and RevenueCat's webhook
+   pointed at `https://YOUR-DOMAIN/api/webhooks/revenuecat` with its `Authorization` header set to exactly
+   `REVENUECAT_WEBHOOK_SECRET`.
+6. **Vercel Deployment Protection looks like a broken app.** With *Vercel Authentication* enabled, Vercel puts **its own login
+   page in front of the app** on preview URLs. That page is served from your project's address but its scripts and beacons come
+   from `vercel.com` (`/sso-api`), which this app's CSP does not allow — so the console fills with
+   `Refused to load … vercel.com/sso-api` violations that are not the app's, and the service worker's fetches fail behind it.
+   **Test on the production alias, or switch Deployment Protection off** (Settings → Deployment Protection) while setting the
+   project up. Do not "fix" it by adding `vercel.com` to the CSP.
+7. **Change the CSP in one place only:** edit the constants in `api/_lib/security/headers.js`, then
+
+   ```bash
+   npm run sync:csp     # rewrites the three vercel.json header blocks from those constants
+   npm test             # fails if vercel.json and the code disagree, or if a page needs an origin you did not add
+   ```
+
+   `vercel.json`'s policy strings are generated; never hand-edit them.
+
+**What a missed step looks like**
+
+| Symptom | Cause |
+|---|---|
+| Every endpoint answers `503 {"error":"server_misconfigured"}` and the Vercel log names a variable | that variable is missing from the scope this deployment runs in — step 1 |
+| `403 {"error":"origin_not_allowed"}` from your own page | the page's origin matches neither `SITE_URL`, `ALLOWED_ORIGINS` nor the `Host` the request was sent to: a proxy or custom domain in front of the deployment — step 4 |
+| `Refused to connect … violates the following CSP directive: "connect-src"`, reported from `sw.js` | the worker re-fetches a CDN or font origin that `connect-src` does not list — step 7 |
+| Vercel's login page instead of the app on a preview URL, with `vercel.com/sso-api` violations | Deployment Protection — step 6 |
+| Sign-up says the account still has to be confirmed | "Confirm email" is still ON in that Supabase project — step 2 |
+| The Centres tab is empty | `supabase/seed_centres.sql` was not run — step 2 |
+| The compass works but a payment never activates | the ITN address still points at the old domain, or the passphrase is not the new PayFast account's — step 5 |
+| The old shell keeps coming back after a deploy | the service worker's cache name in `public/sw.js` was not bumped |
+
 ## PayFast security in this code
 Every notification (`api/_lib/domain/itn.js`) must pass all of these before anything changes:
 1. **Signature** recomputed from the fields exactly as received, with the secret passphrase (PHP-urlencode rules, MD5).
@@ -138,24 +197,40 @@ the same as PayFast's PHP reference code (`tests/unit/php-reference.php`).
 ## Security measures in this code
 
 **Every response is served with a policy, not a promise.** `vercel.json` carries the same strings the code exports
-(`api/_lib/security/headers.js`), so a header cannot drift from the constant the tests check:
+(`api/_lib/security/headers.js`), so a header cannot drift from the constant the tests check. Those three header blocks are
+**generated, never hand-edited**: `npm run sync:csp` (`scripts/sync-csp.mjs`) rewrites them from the constants and says which
+blocks changed, and `tests/unit/security.test.js` fails the build if the file and the code ever disagree:
 
 - **Content-Security-Policy** — `default-src 'self'`, `object-src 'none'`, `base-uri 'none'`, `frame-ancestors 'none'`,
   `form-action` limited to this site and PayFast. Scripts are same-origin plus Leaflet/d3/topojson from cdnjs, jsdelivr and unpkg.
   The pages carry **no inline `<script>` and no inline event handler**, so `script-src` has no `'unsafe-inline'` and no `'unsafe-eval'`
   (only styles are inline). `public/privacy.html` is served with `frame-ancestors` allowing `africanhiddenvoices.co.za`, so it can be
   embedded in the main site, and nothing else.
+- **`connect-src` lists every origin the pages fetch from**, not only the ones this site calls: the Supabase project, jsdelivr,
+  cdnjs, unpkg and the two Google font hosts. `public/sw.js` is a same-origin **classic** worker, so it inherits its *document's*
+  CSP — every `fetch()` inside it is checked against `connect-src`, whatever directive governs the resource on the page. A CDN in
+  `script-src` but missing from `connect-src` is therefore refused at runtime, and the console reports
+  `Refused to connect … violates the following CSP directive: "connect-src"`. These are origins the pages already execute code
+  from, so listing them for the worker adds nothing to the attack surface. The privacy notice is plain text and fetches nothing,
+  so its own policy keeps `connect-src 'self'`.
 - **Strict-Transport-Security** `max-age=63072000; includeSubDomains; preload`, plus `X-Content-Type-Options: nosniff`,
   `Referrer-Policy`, Cross-Origin-Opener/Resource-Policy and a `Permissions-Policy` that allows only the sensors the compass needs.
   API answers add `Cache-Control: no-store` and `X-Frame-Options: DENY`.
 - **Every API answer is JSON of the shape `{ "error": "code" }`** or the endpoint's own body; internals and stack traces go to the
-  logs only (`http/errors.js`, `http/route.js`).
+  logs only (`http/errors.js`, `http/route.js`). A missing or malformed environment variable is a `ConfigError`
+  (`config/env.js`) and answers **503 `server_misconfigured`** rather than a generic 500 — the code is fine, the deployment is
+  not — and the 5xx log line names the variable, so a copied project says what to fix. The client only ever sees the code.
 
 **Every request passes the same seven steps** (`api/_lib/http/route.js`): method allowlist → same-origin check → rate limit →
 authentication → size-capped body read → the handler → error mapping.
 
-- **Origin check** (`security/origin.js`): a browser request must come from this site or `ALLOWED_ORIGINS`; no CORS header is ever
-  sent, so no other origin can read a reply. Server-to-server callers (PayFast, RevenueCat) send no `Origin` and are allowed.
+- **Origin check** (`security/origin.js`): a browser request must come from `SITE_URL`, from `ALLOWED_ORIGINS`, or from **the
+  address this deployment is actually being reached on** — its `Origin` must equal the request's own `Host`
+  (`x-forwarded-host`/`x-forwarded-proto` on Vercel). A browser sets `Origin` from the page the script runs on and `Host` from the
+  URL it was asked to fetch, and a script can set neither, so the two only agree for a same-origin page: another site can never
+  make them match, which is what lets a fresh `*.vercel.app` domain or a preview URL work without editing `SITE_URL`. No CORS
+  header is ever sent, so no other origin can read a reply. Server-to-server callers (PayFast, RevenueCat) send no `Origin` and
+  are allowed.
 - **Rate limits** (`security/rate-limit.js`, per route in `config/policy.js`): memory by default, or the shared
   `rate_limits` table and `consume_rate_limit()` function when `RATE_LIMIT_BACKEND=supabase`, so several serverless instances share
   one count. The limiter fails open if its store is down - a guard, not the gate - and webhooks are never limited.
@@ -173,8 +248,11 @@ never include an address, password or token. Webhook secrets are compared in con
 service-role key, PayFast passphrase and RevenueCat secret exist only in Vercel's environment variables - `public/` holds nothing
 but the publishable anon key.
 
-`tests/unit/security.test.js` pins all of the above: the deployed CSP equals the code's constant, no page has an inline script, no
-route writes its own response, no secret string appears anywhere under `public/`, and the limiter counts per route and caller.
+`tests/unit/security.test.js` pins all of the above: the deployed CSP equals the code's constant, `connect-src` covers every
+third-party origin the pages and the worker fetch from, no page under `public/` has an inline script, no route writes its own
+response, a missing variable answers 503 `server_misconfigured`, the origin table allows our own page on whatever address the
+deployment answers on and refuses a stranger, no secret string appears anywhere under `public/`, and the limiter counts per route
+and caller.
 
 ## App stores and payments (important)
 Selling a digital subscription **inside** a store app normally requires the store's own billing:
@@ -220,6 +298,8 @@ update members set trial_ends_at = now() + interval '7 days' where email = 'some
 npm install
 npm test                      # API tests + the membership layer in jsdom; no browser needed
                               # (PHP on the PATH also enables the PayFast reference comparisons)
+npm run sync:csp              # after editing the CSP constants: rewrites vercel.json's three
+                              # header blocks from api/_lib/security/headers.js
 npx playwright install chromium
 npm run test:e2e              # the same membership flows in a real browser, backend mocked
 ```

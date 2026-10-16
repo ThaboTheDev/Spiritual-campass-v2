@@ -868,6 +868,131 @@ test("the service worker refuses to cache the API, auth, PayFast and the one-use
   assert.equal(cacheStore.cached.some((k) => k.includes("/api/")), false, "and no API response ever does");
 });
 
+/* v4 handed respondWith() `undefined` whenever the cache missed AND the fetch failed -
+   precisely what the CSP-blocked CDN fetches did - and the browser reported "Failed to
+   convert value to 'Response'"; a rejected branch reported "the promise was rejected".
+   This runs the shipped sw.js in the worst case there is: a network that always throws and
+   a cache that is always empty, and demands a real Response on every path.
+   Two things that make this harness easy to get wrong, so they are written down here:
+     · the cache stub needs a top-level `match` (caches.match) as well as `open`;
+     · respondWith's argument is a promise, and the listener returns undefined, so the
+       "handled" flag has to be set by the stub itself. */
+test("with no network and no cache the worker still answers every fetch with a Response", async () => {
+  const src = fs.readFileSync(path.join(PUB, "sw.js"), "utf8");
+  const listeners = {};
+  const selfStub = {
+    addEventListener: (type, fn) => { listeners[type] = fn; },
+    skipWaiting: async () => {},
+    clients: { claim: async () => {} },
+  };
+  const emptyCache = { match: async () => undefined, add: async () => {}, put: async () => {}, keys: async () => [] };
+  const cachesStub = { open: async () => emptyCache, match: async () => undefined, keys: async () => [], delete: async () => true };
+  const alwaysDown = async () => { throw new Error("network down"); };
+
+  const run = new Function("self", "caches", "location", "fetch", src);
+  run(selfStub, cachesStub, new URL("http://localhost/sw.js"), alwaysDown);
+
+  for (const type of ["install", "activate", "fetch"]) assert.equal(typeof listeners[type], "function", "the worker listens for " + type);
+
+  /* The flag is set before the promise is awaited: the return value of the listener says
+     nothing, so "did the worker take this request?" can only be answered by the stub. */
+  const fire = (url, mode) => {
+    const out = { handled: false, promise: null, response: undefined, rejected: null };
+    listeners.fetch({
+      request: { url, method: "GET", mode },
+      respondWith: (p) => { out.handled = true; out.promise = Promise.resolve(p); },
+    });
+    return out;
+  };
+  const settle = async (url, mode) => {
+    const out = fire(url, mode);
+    if (!out.handled) return out;
+    try { out.response = await out.promise; } catch (e) { out.rejected = e; }
+    return out;
+  };
+
+  /* A navigation with nothing cached: the offline page, not a crash and not a blank tab. */
+  const nav = await settle("http://localhost/", "navigate");
+  assert.equal(nav.handled, true, "a navigation is answered by the worker");
+  assert.equal(nav.rejected, null, "and respondWith()'s promise never rejects: " + (nav.rejected && nav.rejected.message));
+  assert.ok(nav.response instanceof Response, "it resolves with a real Response, not " + String(nav.response));
+  assert.equal(nav.response.status, 503, "the offline page is a 503");
+  const page = await nav.response.clone().text();
+  assert.match(page, /offline/i, "and it says the app is offline");
+  assert.match(page, /internet/i, "it says the internet is needed to check the membership");
+  assert.equal(nav.response.headers.get("content-type"), "text/html; charset=utf-8");
+  assert.match(nav.response.headers.get("cache-control") || "", /no-store/, "the offline page is never stored");
+  assert.doesNotMatch(page, /<script/i, "it carries no script at all");
+  assert.match(page, /<a[^>]+href="\/"[^>]*>\s*Try again\s*<\/a>/i, "the retry is a link to / labelled Try again");
+
+  /* Subresources: a network-error Response. `type` is what identifies Response.error();
+     its status is 0 and its body is null, so asserting on status would pass for anything. */
+  for (const [url, mode, what] of [
+    ["http://localhost/app.js", "no-cors", "a same-origin script"],
+    ["https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css", "no-cors", "a CDN file"],
+  ]) {
+    const r = await settle(url, mode);
+    assert.equal(r.handled, true, what + " is answered by the worker");
+    assert.equal(r.rejected, null, what + " does not reject respondWith(): " + (r.rejected && r.rejected.message));
+    assert.ok(r.response instanceof Response, what + " resolves with a Response, never with " + String(r.response));
+    assert.equal(r.response.type, "error", what + " resolves with Response.error()");
+  }
+
+  /* And the membership API is none of the worker's business: it must go to the network
+     untouched, so access is always decided live. */
+  const api = fire("http://localhost/api/me", "cors");
+  assert.equal(api.handled, false, "/api/me is left alone: respondWith() is never called");
+});
+
+/* install() must not be all-or-nothing. caches.addAll() rejects the whole install when one
+   file 404s, which leaves the worker redundant and the app with no offline copy at all; one
+   add() per file, each with its own catch, means a missing icon costs one icon. Activation
+   then has to drop every older version, or a stale shell outlives the fix that replaced it. */
+test("a missing shell file cannot fail the install, and activation drops the old caches", async () => {
+  const src = fs.readFileSync(path.join(PUB, "sw.js"), "utf8");
+  const cacheName = (src.match(/const CACHE = "([^"]+)"/) || [])[1];
+  assert.match(cacheName || "", /^tshk-compass-sub-v\d+$/, "the cache name is versioned: " + cacheName);
+
+  const listeners = {};
+  const added = [];
+  const deleted = [];
+  const claimed = [];
+  let skipped = 0;
+  const shell = {
+    add: async (file) => { added.push(file); if (file === "/icon-512.png") throw new Error("404 not found"); },
+    match: async () => undefined, put: async () => {}, keys: async () => [],
+  };
+  const selfStub = {
+    addEventListener: (t, fn) => { listeners[t] = fn; },
+    skipWaiting: async () => { skipped += 1; },
+    clients: { claim: async () => { claimed.push(true); } },
+  };
+  const cachesStub = {
+    open: async () => shell,
+    match: async () => undefined,
+    keys: async () => ["tshk-compass-sub-v1", cacheName, "some-other-cache"],
+    delete: async (k) => { deleted.push(k); return true; },
+  };
+
+  new Function("self", "caches", "location", "fetch", src)(
+    selfStub, cachesStub, new URL("http://localhost/sw.js"), async () => { throw new Error("network down"); });
+
+  const waits = [];
+  listeners.install({ waitUntil: (p) => waits.push(p) });
+  listeners.activate({ waitUntil: (p) => waits.push(p) });
+  await Promise.all(waits.map((p) => Promise.resolve(p)));     // must settle, never reject
+
+  assert.ok(added.length >= 9, "every shell file is added on its own: " + added.join(", "));
+  assert.deepEqual(added, [...new Set(added)], "and none of them twice");
+  for (const file of ["/index.html", "/member.js", "/app.js", "/config.js"]) {
+    assert.ok(added.includes(file), file + " is part of the shell");
+  }
+  assert.equal(skipped, 1, "skipWaiting() still runs, so the missing /icon-512.png did not fail the install");
+  assert.deepEqual(deleted.sort(), ["some-other-cache", "tshk-compass-sub-v1"], "every cache that is not the current one is dropped");
+  assert.equal(deleted.includes(cacheName), false, "and the current one is kept");
+  assert.deepEqual(claimed, [true], "then the worker takes control of the pages that are already open");
+});
+
 test("a failed centres load says so and offers a retry that works", async () => {
   const b = await boot({ seed: { "tshk-session": sess(), "tshk-welcome": JSON.stringify({ "member@example.org": true }) }, state: { centresStatus: { status: 500, body: { error: "server_error" } } } });
   await wait(8);

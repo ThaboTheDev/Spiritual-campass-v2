@@ -8,7 +8,8 @@
   },
   "scripts": {
     "test": "node --test tests/unit/*.test.js",
-    "test:e2e": "node tests/e2e/paywall.test.cjs"
+    "test:e2e": "node tests/e2e/paywall.test.cjs",
+    "sync:csp": "node scripts/sync-csp.mjs"
   },
   "devDependencies": {
     "jsdom": "^30.1.1",

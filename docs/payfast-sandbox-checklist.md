@@ -11,10 +11,15 @@ Nothing in this flow sends an e-mail — not the app, not Supabase.
    length 8. Leave **Project Settings → Auth → SMTP empty** — this app needs no mail server.
 3. Supabase → Authentication → URL Configuration: the site URL and redirect URLs do not matter for
    sign-in any more (no confirmation or reset link is generated), but keep them pointing at the site.
-4. Vercel → Environment Variables: `SITE_URL` = the deployed origin (no trailing slash),
+4. Vercel → Environment Variables: **every** variable in `.env.example`, for **Production and
+   Preview** — `SITE_URL` = the deployed origin (no trailing slash),
    `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`,
    `PAYFAST_MERCHANT_ID` / `PAYFAST_MERCHANT_KEY` / `PAYFAST_PASSPHRASE` from the PayFast sandbox,
    `PAYFAST_SANDBOX=true`, `SUBSCRIPTION_AMOUNT=100`, `TRIAL_DAYS=7`, `GRACE_DAYS=3`.
+   A variable that is missing or mistyped does not fail as a 500: every endpoint answers
+   `503 {"error":"server_misconfigured"}` and the Vercel log line for the request names the
+   variable, so check the log first when a fresh project misbehaves.
+   Note that Vercel reads environment variables at deploy time — redeploy after changing one.
 5. Deploy, open the site, create an account, then make it the first admin in the SQL editor:
    `update public.members set is_admin = true where lower(email) = lower('you@example.org');`
 
@@ -120,7 +125,7 @@ Nothing in this flow sends an e-mail — not the app, not Supabase.
 `.github/workflows/tests.yml` runs on every push and pull request to `main`, on
 Ubuntu with Node 22, PHP 8.2 and a real Chromium:
 
-- **Unit and API: 103 tests, 0 skipped.** PHP is installed, so the six tests that
+- **Unit and API: 140 tests, 0 skipped.** PHP is installed, so the six tests that
   compare the Node signing code against PayFast's own PHP reference
   (`tests/unit/php-reference.php`) byte for byte all run and pass — the
   checkout, ITN and API signatures included. Several cover things that fail
@@ -140,8 +145,10 @@ Ubuntu with Node 22, PHP 8.2 and a real Chromium:
   keyboard focus ring. It also registers the **real** service worker and reads
   its `Cache`, which the jsdom suite cannot do — proving nothing under `/api/*`,
   no Supabase or PayFast call and no one-use page is ever stored, while the app
-  shell is, all under the versioned cache name. That exercises
-  `caches.addAll(CORE)` for real, so a missing shell file fails here.
+  shell is, all under the versioned cache name. That exercises the real `install`
+  event: each shell file is added on its own, so one missing icon can no longer fail
+  the whole install - and the assertions above are what catch a shell file that is
+  genuinely gone, because it then never lands in the cache.
 - **True offline.** After the worker has cached the shell, the suite calls
   `setOffline(true)`, installs an abort-all route, and reloads — so the network
   is genuinely dead, not merely reported as down. The app still opens from the
@@ -175,7 +182,7 @@ automated tests in this repository could **not** prove:
 - **The 378 Portuguese, Chichewa and iciBemba strings need a native speaker.**
   See `docs/translations-to-review.md`.
 - **The `grace` branch is defensive.** The client renders a "payment is late"
-  message for `state: "grace"`, but `api/_lib/entitlement.js` never returns that
+  message for `state: "grace"`, but `api/_lib/domain/entitlement.js` never returns that
   value — a late payment comes back as `past_due`, and that path **is** tested.
   The `grace` wording therefore cannot be exercised by a real payment; it is left
   in place in case the server starts emitting it.
