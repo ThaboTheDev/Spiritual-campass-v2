@@ -4,6 +4,8 @@
 // shape every endpoint has always used: { error: "code" }. Nothing else — no stack,
 // no upstream message — ever reaches the client.
 
+import { ConfigError } from "../config/env.js";
+
 export class HttpError extends Error {
   constructor(status, code, { details = undefined } = {}) {
     super(code);
@@ -32,9 +34,14 @@ export function isUniqueViolation(error) {
 }
 
 /* Anything thrown anywhere becomes { status, code }. Unknown failures are a plain
-   500 so an internal message can never be reflected back to the caller. */
+   500 so an internal message can never be reflected back to the caller.
+   A missing or malformed environment variable is not a 500: the code is fine and
+   the deployment is not, so it answers 503 "server_misconfigured". The route
+   wrapper logs error.message for every 5xx, which names the variable in Vercel's
+   log; the client only ever sees the code. */
 export function toHttpError(error) {
   if (error instanceof HttpError) return error;
+  if (error instanceof ConfigError) return new HttpError(503, "server_misconfigured");
   const status = Number(error && error.status);
   if (Number.isInteger(status) && status >= 400 && status <= 599) {
     return new HttpError(status, (error && error.code) || "server_error");

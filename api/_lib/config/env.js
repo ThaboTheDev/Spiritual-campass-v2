@@ -10,37 +10,47 @@
 // Every variable is documented in .env.example, and tests/unit/env-docs.test.js
 // fails the build when the two drift apart.
 
+/* A configuration problem is not a bug in the request: it is the deployment
+   missing a variable, and it is the same for every caller until somebody fixes
+   the environment. http/errors.js maps it to 503 "server_misconfigured" instead
+   of a generic 500, so an operator can tell "this code broke" from "this project
+   was never configured" at a glance - and the message, which names the variable,
+   still reaches the Vercel log. */
+export class ConfigError extends Error {
+  constructor(message) { super(message); this.name = "ConfigError"; }
+}
+
 export function env(name, fallback) {
   const v = process.env[name];
   if (v === undefined || v === "") {
     if (fallback !== undefined) return fallback;
-    throw new Error(`Missing environment variable ${name}`);
+    throw new ConfigError("Missing environment variable " + name);
   }
   return v;
 }
 
 /* ---- validators: each one throws a message naming the variable and what is wrong ---- */
 const asBool = (name, value) => {
-  if (value !== "true" && value !== "false") throw new Error(`${name} must be "true" or "false"`);
+  if (value !== "true" && value !== "false") throw new ConfigError(`${name} must be "true" or "false"`);
   return value === "true";
 };
 const asInt = (name, value, min, max) => {
-  if (!/^-?\d+$/.test(String(value).trim())) throw new Error(`${name} must be a whole number`);
+  if (!/^-?\d+$/.test(String(value).trim())) throw new ConfigError(`${name} must be a whole number`);
   const n = Number(value);
-  if (n < min || n > max) throw new Error(`${name} must be between ${min} and ${max}`);
+  if (n < min || n > max) throw new ConfigError(`${name} must be between ${min} and ${max}`);
   return n;
 };
 const asMoney = (name, value) => {
   const n = Number(String(value).trim());
-  if (!Number.isFinite(n) || n <= 0 || n > 100000) throw new Error(`${name} must be a positive amount`);
+  if (!Number.isFinite(n) || n <= 0 || n > 100000) throw new ConfigError(`${name} must be a positive amount`);
   return n.toFixed(2);
 };
 /* Absolute http(s) URL without a trailing slash. */
 const asUrl = (name, value, { allowInsecure = false } = {}) => {
   let u;
-  try { u = new URL(String(value).trim()); } catch { throw new Error(`${name} must be a full URL, for example https://example.org`); }
-  if (u.protocol !== "https:" && !(allowInsecure && u.protocol === "http:")) throw new Error(`${name} must use https`);
-  if (!u.hostname.includes(".") && u.hostname !== "localhost") throw new Error(`${name} must name a host, for example https://example.org`);
+  try { u = new URL(String(value).trim()); } catch { throw new ConfigError(`${name} must be a full URL, for example https://example.org`); }
+  if (u.protocol !== "https:" && !(allowInsecure && u.protocol === "http:")) throw new ConfigError(`${name} must use https`);
+  if (!u.hostname.includes(".") && u.hostname !== "localhost") throw new ConfigError(`${name} must name a host, for example https://example.org`);
   return (u.origin + u.pathname.replace(/\/+$/, "")).replace(/\/+$/, "");
 };
 /* Browser origins allowed to call this API with a cross-site request. The literal
@@ -51,8 +61,8 @@ const asOrigins = (name, value) => {
   const list = text.split(",").map((s) => s.trim()).filter(Boolean);
   for (const o of list) {
     let u;
-    try { u = new URL(o); } catch { throw new Error(`${name} entry "${o}" must be an origin such as https://example.org`); }
-    if (u.origin !== o.replace(/\/+$/, "")) throw new Error(`${name} entry "${o}" must be a bare origin such as https://example.org`);
+    try { u = new URL(o); } catch { throw new ConfigError(`${name} entry "${o}" must be an origin such as https://example.org`); }
+    if (u.origin !== o.replace(/\/+$/, "")) throw new ConfigError(`${name} entry "${o}" must be a bare origin such as https://example.org`);
   }
   return [...new Set(list.map((o) => o.replace(/\/+$/, "")))];
 };
@@ -89,7 +99,7 @@ function read() {
 export function cfg() {
   const r = read();
   const backend = String(r.rateLimitBackend).trim().toLowerCase();
-  if (!["memory", "supabase"].includes(backend)) throw new Error("RATE_LIMIT_BACKEND must be \"memory\" or \"supabase\"");
+  if (!["memory", "supabase"].includes(backend)) throw new ConfigError("RATE_LIMIT_BACKEND must be \"memory\" or \"supabase\"");
   return {
     siteUrl: asUrl("SITE_URL", r.siteUrl),
     supabaseUrl: asUrl("SUPABASE_URL", r.supabaseUrl),
@@ -126,7 +136,7 @@ export function securityCfg() {
 
 export function revenuecatCfg() {
   const r = read();
-  if (String(r.revenuecatWebhookSecret).length < 16) throw new Error("REVENUECAT_WEBHOOK_SECRET must be at least 16 characters");
-  if (!r.revenuecatEntitlementId.trim()) throw new Error("REVENUECAT_ENTITLEMENT_ID must not be blank");
+  if (String(r.revenuecatWebhookSecret).length < 16) throw new ConfigError("REVENUECAT_WEBHOOK_SECRET must be at least 16 characters");
+  if (!r.revenuecatEntitlementId.trim()) throw new ConfigError("REVENUECAT_ENTITLEMENT_ID must not be blank");
   return { webhookSecret: r.revenuecatWebhookSecret, entitlementId: r.revenuecatEntitlementId };
 }
